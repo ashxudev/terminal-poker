@@ -1,0 +1,33 @@
+[package]
+name = "terminal-poker"
+version = "0.1.0"
+edition = "2021"
+description = "A heads-up No-Limit Texas Hold'em training tool for the terminal"
+license = "MIT"
+repository = "https://github.com/terminal-poker/terminal-poker"
+keywords = ["poker", "terminal", "tui", "game", "training"]
+categories = ["games", "command-line-utilities"]
+default-run = "poker"
+
+# Both binaries use the same source - users can run `terminal-poker` or `poker`
+[[bin]]
+name = "terminal-poker"
+path = "src/main.rs"
+
+[[bin]]
+name = "poker"
+path = "src/main.rs"
+
+[dependencies]
+ratatui = "0.29"
+crossterm = "0.28"
+rand = "0.8"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.0", features = ["derive"] }
+dirs = "5.0"
+ctrlc = "3.4"
+
+[profile.release]
+lto = true
+codegen-units = 1
