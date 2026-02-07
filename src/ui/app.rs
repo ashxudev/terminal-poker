@@ -34,10 +34,16 @@ impl App {
 
     pub fn toggle_help(&mut self) {
         self.show_help = !self.show_help;
+        if self.show_help {
+            self.show_stats = false;
+        }
     }
 
     pub fn toggle_stats(&mut self) {
         self.show_stats = !self.show_stats;
+        if self.show_stats {
+            self.show_help = false;
+        }
     }
 
     pub fn new_session(&mut self) {
