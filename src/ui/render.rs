@@ -157,27 +157,43 @@ pub fn render(frame: &mut Frame, app: &App) {
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
         .border_style(Style::default().fg(TABLE_BORDER));
-    let inner_area = outer_block.inner(size);
+    let full_inner = outer_block.inner(size);
     frame.render_widget(outer_block, size);
+
+    // Cap layout height so spacers don't over-expand on tall terminals.
+    // Content needs ~35 rows; beyond that, center vertically and leave
+    // the surplus as empty padding above/below.
+    const MAX_LAYOUT_HEIGHT: u16 = 45;
+    let inner_area = if full_inner.height > MAX_LAYOUT_HEIGHT {
+        let pad = (full_inner.height - MAX_LAYOUT_HEIGHT) / 2;
+        Rect {
+            x: full_inner.x,
+            y: full_inner.y + pad,
+            width: full_inner.width,
+            height: MAX_LAYOUT_HEIGHT,
+        }
+    } else {
+        full_inner
+    };
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),  // [0]  Status bar
-            Constraint::Length(1),  // [1]  Spacer
+            Constraint::Fill(1),   // [1]  Spacer
             Constraint::Length(1),  // [2]  Opponent label
-            Constraint::Length(1),  // [3]  Spacer
+            Constraint::Fill(1),   // [3]  Spacer
             Constraint::Length(1),  // [4]  Opponent stack
             Constraint::Length(5),  // [5]  Opponent cards
-            Constraint::Length(1),  // [6]  Spacer (opponent cards → table)
-            Constraint::Length(11), // [7]  Board box
-            Constraint::Length(1),  // [8]  Spacer (table → player label)
+            Constraint::Fill(1),   // [6]  Spacer (opponent cards → table)
+            Constraint::Min(11),   // [7]  Board box (protected)
+            Constraint::Fill(1),   // [8]  Spacer (table → player label)
             Constraint::Length(1),  // [9]  Player label
-            Constraint::Length(1),  // [10] Spacer
+            Constraint::Fill(1),   // [10] Spacer
             Constraint::Length(5),  // [11] Player cards
-            Constraint::Length(1),  // [12] Spacer
+            Constraint::Fill(1),   // [12] Spacer
             Constraint::Length(1),  // [13] Player stack
-            Constraint::Length(1),  // [14] Spacer
+            Constraint::Fill(1),   // [14] Spacer
             Constraint::Length(1),  // [15] Action bar
             Constraint::Length(1),  // [16] Quick bets / raise input
             Constraint::Min(5),    // [17] Action log (bordered box)
