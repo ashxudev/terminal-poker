@@ -9,12 +9,9 @@ use crate::stats::persistence::StatsStore;
 const DELAY_BOT_ACTION_MS: u64 = 700;
 const DELAY_STREET_PAUSE_MS: u64 = 500;
 const DELAY_NEW_HAND_MS: u64 = 1200;
-const DELAY_DEAL_CARD_MS: u64 = 300;
-
 #[derive(Debug, Clone)]
 pub enum GameEvent {
     BotAction,
-    DealCard,
     StartNewHand,
     RecordShowdownStats,
 }
@@ -35,10 +32,6 @@ pub struct App {
     pub action_log: Vec<ActionLogEntry>,
     pub pending_events: VecDeque<GameEvent>,
     pub next_event_at: Option<Instant>,
-    pub bot_thinking: bool,
-    pub bot_thinking_since: Option<Instant>,
-    pub phase_changed_at: Option<Instant>,
-    pub revealed_board_cards: usize,
     pub raise_mode: bool,
     starting_stack_bb: u32,
     last_phase: GamePhase,
@@ -61,10 +54,6 @@ impl App {
             action_log: Vec::new(),
             pending_events: VecDeque::new(),
             next_event_at: None,
-            bot_thinking: false,
-            bot_thinking_since: None,
-            phase_changed_at: None,
-            revealed_board_cards: 0,
             raise_mode: false,
             starting_stack_bb,
             last_phase: initial_phase,
@@ -97,9 +86,6 @@ impl App {
         self.action_log.clear();
         self.pending_events.clear();
         self.next_event_at = None;
-        self.bot_thinking = false;
-        self.bot_thinking_since = None;
-        self.revealed_board_cards = 0;
         self.raise_mode = false;
         self.raise_input.clear();
         self.message = Some("New session started!".to_string());
@@ -197,7 +183,6 @@ impl App {
         // Detect street transitions for extra pause
         let phase_changed = self.game_state.phase != self.last_phase;
         if phase_changed {
-            self.phase_changed_at = Some(Instant::now());
             self.last_phase = self.game_state.phase;
         }
 
@@ -228,20 +213,6 @@ impl App {
                 // Terminal states — nothing to enqueue
             }
             _ => {
-                // Reveal flop cards one at a time before any actions
-                let board_len = self.game_state.board.len();
-                if self.revealed_board_cards < board_len {
-                    self.pending_events.push_back(GameEvent::DealCard);
-                    let delay = if self.revealed_board_cards == 0 {
-                        DELAY_STREET_PAUSE_MS // first flop card gets a longer pause
-                    } else {
-                        DELAY_DEAL_CARD_MS
-                    };
-                    self.next_event_at =
-                        Some(Instant::now() + Duration::from_millis(delay));
-                    return;
-                }
-
                 if self.game_state.to_act == Player::Bot {
                     let delay = if phase_changed {
                         DELAY_STREET_PAUSE_MS + DELAY_BOT_ACTION_MS
@@ -251,9 +222,7 @@ impl App {
                     self.pending_events.push_back(GameEvent::BotAction);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(delay));
-                    self.bot_thinking = true;
-                    self.bot_thinking_since = Some(Instant::now());
-                }
+}
                 // else: player's turn, wait for input
             }
         }
@@ -280,8 +249,6 @@ impl App {
 
         match event {
             GameEvent::BotAction => {
-                self.bot_thinking = false;
-                self.bot_thinking_since = None;
                 let street = Self::phase_name(self.game_state.phase);
                 let bot_action = self.bot.decide(&self.game_state);
                 let desc = bot_action.description_for("Bot");
@@ -289,14 +256,10 @@ impl App {
                 self.log_action(street, format!("Bot {}", desc));
                 self.message = Some(format!("Bot {}", desc));
             }
-            GameEvent::DealCard => {
-                self.revealed_board_cards += 1;
-            }
             GameEvent::StartNewHand => {
                 self.saw_flop_this_hand = false;
                 self.recorded_hand_this_round = false;
                 self.recorded_vpip_this_hand = false;
-                self.revealed_board_cards = 0;
                 self.raise_mode = false;
                 self.raise_input.clear();
                 self.game_state.start_new_hand();
