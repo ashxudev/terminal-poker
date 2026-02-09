@@ -99,25 +99,27 @@ fn run_game_loop(
         // Draw UI
         terminal.draw(|f| ui::render::render(f, app))?;
 
-        // Handle input
-        if event::poll(std::time::Duration::from_millis(100))? {
+        // Process pending game events (timed)
+        app.process_next_event(stats_store);
+
+        // Handle input (50ms poll for responsive event processing)
+        if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 match app.game_state.phase {
                     GamePhase::Showdown => {
-                        // Any key continues to next hand
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                // Record session stats before quitting
                                 stats_store.record_session_end();
                                 stats_store.record_profit(
                                     (app.game_state.session_profit_bb() * 2.0).round() as i64,
                                 );
                                 app.game_state.phase = GamePhase::Summary;
                             }
-                            _ => {
-                                app.continue_after_showdown();
-                                app.initialize(stats_store);
+                            // Only Space/Enter to continue (matches "[Space] Continue" prompt)
+                            KeyCode::Char(' ') | KeyCode::Enter => {
+                                app.continue_after_showdown(stats_store);
                             }
+                            _ => {} // Ignore other keys during showdown
                         }
                     }
                     GamePhase::Summary | GamePhase::SessionEnd => {
@@ -136,7 +138,6 @@ fn run_game_loop(
                         }
                     }
                     _ => {
-                        // Check for Ctrl+C
                         if key.modifiers.contains(KeyModifiers::CONTROL)
                             && key.code == KeyCode::Char('c')
                         {
@@ -145,7 +146,6 @@ fn run_game_loop(
 
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                // Record session stats before quitting
                                 stats_store.record_session_end();
                                 stats_store.record_profit(
                                     (app.game_state.session_profit_bb() * 2.0).round() as i64,
@@ -159,10 +159,16 @@ fn run_game_loop(
                                 app.toggle_stats();
                             }
                             _ => {
-                                if let Some(action) =
-                                    ui::input::handle_key(key, &app.game_state, &mut app.raise_input)
+                                // Block gameplay input while events are pending or overlays are open
+                                if !app.has_pending_events()
+                                    && !app.show_help
+                                    && !app.show_stats
                                 {
-                                    app.apply_player_action(action, stats_store);
+                                    if let Some(action) =
+                                        ui::input::handle_key(key, &app.game_state, &mut app.raise_input, &mut app.raise_mode)
+                                    {
+                                        app.apply_player_action(action, stats_store);
+                                    }
                                 }
                             }
                         }

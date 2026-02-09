@@ -1,4 +1,14 @@
+use super::state::BIG_BLIND;
 use serde::{Deserialize, Serialize};
+
+fn format_bb(chips: u32) -> String {
+    let bb = chips as f64 / BIG_BLIND as f64;
+    if bb == bb.floor() {
+        format!("{}BB", bb as u32)
+    } else {
+        format!("{:.1}BB", bb)
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Action {
@@ -31,6 +41,20 @@ impl Action {
             Action::Bet(amt) => format!("bets {}", amt),
             Action::Raise(amt) => format!("raises to {}", amt),
             Action::AllIn(amt) => format!("all-in for {}", amt),
+        }
+    }
+
+    /// Actor-aware description with BB-formatted amounts.
+    /// "You" gets base-form verbs ("call"), "Bot" gets third-person ("calls").
+    pub fn description_for(&self, actor: &str) -> String {
+        let is_you = actor == "You";
+        match self {
+            Action::Fold => if is_you { "fold".into() } else { "folds".into() },
+            Action::Check => if is_you { "check".into() } else { "checks".into() },
+            Action::Call(amt) => format!("{} {}", if is_you { "call" } else { "calls" }, format_bb(*amt)),
+            Action::Bet(amt) => format!("{} {}", if is_you { "bet" } else { "bets" }, format_bb(*amt)),
+            Action::Raise(amt) => format!("{} to {}", if is_you { "raise" } else { "raises" }, format_bb(*amt)),
+            Action::AllIn(amt) => format!("{} for {}", if is_you { "all-in" } else { "all-in" }, format_bb(*amt)),
         }
     }
 }

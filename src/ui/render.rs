@@ -196,7 +196,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Fill(1),   // [14] Spacer
             Constraint::Length(1),  // [15] Action bar
             Constraint::Length(1),  // [16] Quick bets / raise input
-            Constraint::Fill(1),   // [17] Status message (absorbs surplus, shrinks first)
+            Constraint::Min(5),    // [17] Action log (bordered box)
         ])
         .split(inner_area);
 
@@ -216,8 +216,8 @@ pub fn render(frame: &mut Frame, app: &App) {
     render_player_stack(frame, app, chunks[13]);
     // chunks[14] = spacer
     render_action_bar(frame, app, chunks[15]);
-    render_quick_bets(frame, app, chunks[16]);
-    render_status_message(frame, app, chunks[17]);
+    render_raise_row(frame, app, chunks[16]);
+    render_action_log(frame, app, chunks[17]);
 
     // Overlays (mutually exclusive — stats/help take priority over phase overlays)
     if app.show_stats {
@@ -266,9 +266,16 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
     ]));
     frame.render_widget(hand_num, cols[0]);
 
+    // Flash the phase name in gold briefly after a street transition
+    let phase_highlight = app
+        .phase_changed_at
+        .map(|t| t.elapsed().as_millis() < 800)
+        .unwrap_or(false);
+    let phase_color = if phase_highlight { GOLD_BRIGHT } else { PHASE_COLOR };
+
     let phase = Paragraph::new(Line::from(Span::styled(
         format!("● {}", phase_name),
-        Style::default().fg(PHASE_COLOR).add_modifier(Modifier::BOLD),
+        Style::default().fg(phase_color).add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center);
     frame.render_widget(phase, cols[1]);
@@ -385,11 +392,12 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let info_line = Paragraph::new(Line::from(info_spans)).alignment(Alignment::Center);
     frame.render_widget(info_line, info_area[0]);
 
-    // Community cards
+    // Community cards (only show up to revealed_board_cards for animation)
     let board = &app.game_state.board;
+    let visible = app.revealed_board_cards.min(board.len());
     let card_data: Vec<[Line<'static>; 5]> = (0..5)
         .map(|i| {
-            if i < board.len() {
+            if i < visible {
                 render_card_lines(&board[i])
             } else {
                 render_empty_slot_lines()
@@ -463,13 +471,18 @@ fn render_player_cards(frame: &mut Frame, app: &App, area: Rect) {
 
 // ── Action Bar ─────────────────────────────────────────────
 
+const BRIGHT_WHITE: Color = Color::Rgb(220, 220, 220);
+
 fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     let available = app.game_state.available_actions();
     let is_player_turn = app.game_state.is_player_turn();
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    if is_player_turn {
+    if is_player_turn && app.raise_mode {
+        // Raise mode replaces the action bar
+        render_raise_bar(&mut spans, app, &available);
+    } else if is_player_turn {
         if available.can_fold {
             spans.push(Span::styled(
                 " F Fold ",
@@ -502,9 +515,26 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
             " A All-in ",
             Style::default().fg(Color::White).bg(ACTION_ALLIN),
         ));
+    } else if app.bot_thinking {
+        let dots = app
+            .bot_thinking_since
+            .map(|t| {
+                let cycle = (t.elapsed().as_millis() / 350) % 4;
+                match cycle {
+                    1 => ".",
+                    2 => "..",
+                    3 => "...",
+                    _ => "",
+                }
+            })
+            .unwrap_or("");
+        spans.push(Span::styled(
+            format!("  Bot is thinking{}", dots),
+            Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+        ));
     } else {
         spans.push(Span::styled(
-            "  Waiting for bot...",
+            "  Waiting...",
             Style::default().fg(DIM),
         ));
     }
@@ -513,64 +543,123 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     frame.render_widget(paragraph, area);
 }
 
-// ── Quick Bets / Raise Input ───────────────────────────────
+fn render_raise_bar(
+    spans: &mut Vec<Span<'static>>,
+    app: &App,
+    available: &crate::game::actions::AvailableActions,
+) {
+    let min_chips = available
+        .min_raise
+        .unwrap_or(available.min_bet.unwrap_or(2));
+    let min_bb = (min_chips + 1) / 2;
+    let pot_bb = app.game_state.pot / 2;
+    let stack_bb = (app.game_state.player_bet + app.game_state.player_stack) / 2;
 
-fn render_quick_bets(frame: &mut Frame, app: &App, area: Rect) {
-    let is_player_turn = app.game_state.is_player_turn();
+    spans.push(Span::styled(
+        "Raise to: ",
+        Style::default().fg(ACTION_RAISE),
+    ));
 
-    if !is_player_turn {
-        frame.render_widget(Paragraph::new(""), area);
-        return;
-    }
-
-    let mut spans: Vec<Span<'static>> = Vec::new();
-
-    if !app.raise_input.is_empty() {
+    if app.raise_input.is_empty() {
         spans.push(Span::styled(
-            "Raise to: ",
-            Style::default().fg(ACTION_RAISE),
+            "___",
+            Style::default()
+                .fg(BRIGHT_WHITE)
+                .add_modifier(Modifier::BOLD),
         ));
+    } else {
+        let typed_bb = app.raise_input.parse::<u32>().unwrap_or(0);
         spans.push(Span::styled(
             app.raise_input.clone(),
             Style::default()
-                .fg(Color::White)
+                .fg(BRIGHT_WHITE)
                 .add_modifier(Modifier::BOLD),
         ));
-        spans.push(Span::styled(
-            "  (Enter/R to confirm, Bksp to edit)",
-            Style::default().fg(DIM),
-        ));
-    } else {
-        spans.push(Span::styled("Bet sizes: ", Style::default().fg(DIM)));
-        for (key, label) in [("1", "33%"), ("2", "50%"), ("3", "67%"), ("4", "100%")] {
+        if typed_bb > 0
+            && typed_bb * 2 >= app.game_state.player_bet + app.game_state.player_stack
+        {
+            spans.push(Span::styled(" (all-in)", Style::default().fg(GOLD)));
+        } else if typed_bb > 0 && typed_bb < min_bb {
             spans.push(Span::styled(
-                format!(" {} ", key),
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Rgb(60, 60, 60)),
+                format!(" (min {}BB)", min_bb),
+                Style::default().fg(DIM),
             ));
-            spans.push(Span::styled(format!(" {}  ", label), Style::default().fg(DIM)));
         }
     }
 
-    let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
+    spans.push(Span::styled(
+        "BB",
+        Style::default().fg(BRIGHT_WHITE),
+    ));
+
+    spans.push(Span::styled(
+        format!(
+            "          min {}BB · pot {}BB · stack {}BB",
+            min_bb, pot_bb, stack_bb
+        ),
+        Style::default().fg(DIM),
+    ));
+
+    spans.push(Span::styled(
+        "          Esc cancel",
+        Style::default().fg(Color::Rgb(100, 100, 100)),
+    ));
 }
 
-// ── Status Message ─────────────────────────────────────────
+// ── Raise Row (reserved space, now unused) ────────────────
 
-fn render_status_message(frame: &mut Frame, app: &App, area: Rect) {
-    let line = if let Some(ref msg) = app.message {
-        Line::from(Span::styled(
-            msg.as_str(),
-            Style::default().fg(Color::White),
-        ))
-    } else {
-        Line::from("")
-    };
+fn render_raise_row(frame: &mut Frame, _app: &App, area: Rect) {
+    frame.render_widget(Paragraph::new(""), area);
+}
 
-    let paragraph = Paragraph::new(line).alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
+// ── Action Log ─────────────────────────────────────────────
+
+const LOG_TEXT: Color = Color::Rgb(220, 220, 220);
+const LOG_STREET: Color = Color::Rgb(120, 120, 120);
+const LOG_SEPARATOR: Color = Color::Rgb(80, 80, 80);
+
+fn render_action_log(frame: &mut Frame, app: &App, area: Rect) {
+    let log_block = Block::default()
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(TABLE_BORDER));
+
+    if app.action_log.is_empty() {
+        frame.render_widget(log_block, area);
+        return;
+    }
+
+    let inner = log_block.inner(area);
+    frame.render_widget(log_block, area);
+
+    let max_entries = inner.height as usize;
+    let start = app.action_log.len().saturating_sub(max_entries);
+
+    let lines: Vec<Line<'static>> = app.action_log[start..]
+        .iter()
+        .map(|entry| {
+            if entry.text.starts_with("──") {
+                // Hand separator line
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(
+                        format!("{:^width$}", entry.text, width = inner.width.saturating_sub(4) as usize),
+                        Style::default().fg(LOG_SEPARATOR),
+                    ),
+                ])
+            } else {
+                Line::from(vec![
+                    Span::raw("  "),
+                    Span::styled(format!("{:>9}", entry.street), Style::default().fg(LOG_STREET)),
+                    Span::styled(" │ ", Style::default().fg(LOG_SEPARATOR)),
+                    Span::styled(entry.text.clone(), Style::default().fg(LOG_TEXT)),
+                ])
+            }
+        })
+        .collect();
+
+    let paragraph = Paragraph::new(lines).alignment(Alignment::Left);
+    frame.render_widget(paragraph, inner);
 }
 
 // ── Overlays ───────────────────────────────────────────────
@@ -597,24 +686,28 @@ fn render_help_overlay(frame: &mut Frame) {
             Span::styled("Call", desc_style),
         ]),
         Line::from(vec![
-            Span::styled("  R ", key_style),
-            Span::styled("Raise (type amount, then R/Enter)", desc_style),
-        ]),
-        Line::from(vec![
             Span::styled("  A ", key_style),
             Span::styled("All-in", desc_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled("Quick Bet Sizes", section_style)),
+        Line::from(Span::styled("Raise Mode", section_style)),
         Line::from(vec![
-            Span::styled("  1 ", key_style),
-            Span::styled("33%   ", desc_style),
-            Span::styled("2 ", key_style),
-            Span::styled("50%   ", desc_style),
-            Span::styled("3 ", key_style),
-            Span::styled("67%   ", desc_style),
-            Span::styled("4 ", key_style),
-            Span::styled("100%", desc_style),
+            Span::styled("  R ", key_style),
+            Span::styled("Enter raise mode", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  ", desc_style),
+            Span::styled("Type BB amount", desc_style),
+            Span::styled(" · ", Style::default().fg(DIM)),
+            Span::styled("↑↓ ", key_style),
+            Span::styled("adjust", desc_style),
+        ]),
+        Line::from(vec![
+            Span::styled("  Enter/R ", key_style),
+            Span::styled("confirm", desc_style),
+            Span::styled(" · ", Style::default().fg(DIM)),
+            Span::styled("Esc ", key_style),
+            Span::styled("cancel", desc_style),
         ]),
         Line::from(""),
         Line::from(Span::styled("General", section_style)),
@@ -783,7 +876,7 @@ fn render_showdown_overlay(frame: &mut Frame, app: &App) {
 
     lines.push(Line::from(""));
     lines.push(Line::from(Span::styled(
-        "[Space] Continue",
+        "[Space/Enter] Continue",
         Style::default().fg(DIM),
     )));
 
