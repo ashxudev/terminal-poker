@@ -220,9 +220,8 @@ impl App {
                         DELAY_BOT_ACTION_MS
                     };
                     self.pending_events.push_back(GameEvent::BotAction);
-                    self.next_event_at =
-                        Some(Instant::now() + Duration::from_millis(delay));
-}
+                    self.next_event_at = Some(Instant::now() + Duration::from_millis(delay));
+                }
                 // else: player's turn, wait for input
             }
         }

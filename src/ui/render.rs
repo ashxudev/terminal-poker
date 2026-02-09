@@ -30,6 +30,7 @@ const DIM: Color = Color::DarkGray;
 const BTN_COLOR: Color = Color::Rgb(220, 160, 40);
 const OVERLAY_BG: Color = Color::Rgb(20, 20, 30);
 const OVERLAY_BORDER: Color = Color::Rgb(100, 100, 140);
+const CHIP_FLAT: Color = Color::Rgb(255, 255, 255);
 
 // ── Helpers ────────────────────────────────────────────────
 
@@ -178,23 +179,23 @@ pub fn render(frame: &mut Frame, app: &App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // [0]  Status bar
+            Constraint::Length(1), // [0]  Status bar
             Constraint::Fill(1),   // [1]  Spacer
-            Constraint::Length(1),  // [2]  Opponent label
+            Constraint::Length(1), // [2]  Opponent label
             Constraint::Fill(1),   // [3]  Spacer
-            Constraint::Length(1),  // [4]  Opponent stack
-            Constraint::Length(5),  // [5]  Opponent cards
+            Constraint::Length(1), // [4]  Opponent stack
+            Constraint::Length(5), // [5]  Opponent cards
             Constraint::Fill(1),   // [6]  Spacer (opponent cards → table)
             Constraint::Min(12),   // [7]  Board box (protected)
             Constraint::Fill(1),   // [8]  Spacer (table → player label)
-            Constraint::Length(1),  // [9]  Player label
+            Constraint::Length(1), // [9]  Player label
             Constraint::Fill(1),   // [10] Spacer
-            Constraint::Length(5),  // [11] Player cards
+            Constraint::Length(5), // [11] Player cards
             Constraint::Fill(1),   // [12] Spacer
-            Constraint::Length(1),  // [13] Player stack
+            Constraint::Length(1), // [13] Player stack
             Constraint::Fill(1),   // [14] Spacer
-            Constraint::Length(1),  // [15] Action bar
-            Constraint::Length(1),  // [16] Quick bets / raise input
+            Constraint::Length(1), // [15] Action bar
+            Constraint::Length(1), // [16] Quick bets / raise input
             Constraint::Min(5),    // [17] Action log (bordered box)
         ])
         .split(inner_area);
@@ -271,9 +272,7 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
 fn render_opponent_label(frame: &mut Frame, _app: &App, area: Rect) {
     let paragraph = Paragraph::new(Line::from(Span::styled(
         "OPPONENT",
-        Style::default()
-            .fg(LABEL)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(LABEL).add_modifier(Modifier::BOLD),
     )))
     .alignment(Alignment::Center);
     frame.render_widget(paragraph, area);
@@ -296,16 +295,16 @@ fn render_opponent_stack(frame: &mut Frame, app: &App, area: Rect) {
 // ── Opponent Cards ─────────────────────────────────────────
 
 fn render_opponent_cards(frame: &mut Frame, app: &App, area: Rect) {
-    let card_data: Vec<[Line<'static>; 5]> =
-        if matches!(app.game_state.phase, GamePhase::Showdown) {
-            app.game_state
-                .bot_cards
-                .iter()
-                .map(|c| render_card_lines(c))
-                .collect()
-        } else {
-            vec![render_facedown_lines(), render_facedown_lines()]
-        };
+    let card_data: Vec<[Line<'static>; 5]> = if matches!(app.game_state.phase, GamePhase::Showdown)
+    {
+        app.game_state
+            .bot_cards
+            .iter()
+            .map(|c| render_card_lines(c))
+            .collect()
+    } else {
+        vec![render_facedown_lines(), render_facedown_lines()]
+    };
 
     let card_lines = compose_card_row(&card_data, " ");
     let paragraph = Paragraph::new(card_lines).alignment(Alignment::Center);
@@ -315,18 +314,29 @@ fn render_opponent_cards(frame: &mut Frame, app: &App, area: Rect) {
 // ── Board Box (bordered, green felt, pot + to-call inside) ──
 
 fn render_bet_chips(frame: &mut Frame, bet: u32, area: Rect) {
-    if bet > 0 {
-        let line = Line::from(vec![
-            Span::styled("● ", Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN)),
-            Span::styled(format_bb(bet), Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN)),
-        ]);
-        frame.render_widget(
-            Paragraph::new(line)
-                .alignment(Alignment::Center)
-                .style(Style::default().bg(FELT_GREEN)),
-            area,
-        );
+    if bet == 0 || area.is_empty() {
+        return;
     }
+
+    let amount = format_bb(bet);
+    let amount_style = Style::default()
+        .fg(GOLD_BRIGHT)
+        .bg(FELT_GREEN)
+        .add_modifier(Modifier::BOLD);
+    let chip_symbol = if area.width < 8 { "●" } else { "◉" };
+    let mut line_spans = vec![Span::styled(
+        chip_symbol,
+        Style::default().fg(CHIP_FLAT).add_modifier(Modifier::BOLD),
+    )];
+    line_spans.push(Span::raw(" "));
+    line_spans.push(Span::styled(amount, amount_style));
+
+    frame.render_widget(
+        Paragraph::new(Line::from(line_spans))
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(FELT_GREEN)),
+        area,
+    );
 }
 
 fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
@@ -377,7 +387,9 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
         info_spans.push(Span::styled("To call: ", Style::default().fg(LABEL)));
         info_spans.push(Span::styled(
             format_bb(to_call),
-            Style::default().fg(ACTION_CALL).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(ACTION_CALL)
+                .add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -410,9 +422,7 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
 fn render_player_label(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span<'static>> = vec![Span::styled(
         "YOU ",
-        Style::default()
-            .fg(LABEL)
-            .add_modifier(Modifier::BOLD),
+        Style::default().fg(LABEL).add_modifier(Modifier::BOLD),
     )];
 
     if app.game_state.is_player_turn() {
@@ -548,9 +558,7 @@ fn render_raise_bar(
                 .fg(BRIGHT_WHITE)
                 .add_modifier(Modifier::BOLD),
         ));
-        if typed_bb > 0
-            && typed_bb * 2 >= app.game_state.player_bet + app.game_state.player_stack
-        {
+        if typed_bb > 0 && typed_bb * 2 >= app.game_state.player_bet + app.game_state.player_stack {
             spans.push(Span::styled(" (all-in)", Style::default().fg(GOLD)));
         } else if typed_bb > 0 && typed_bb < min_bb {
             spans.push(Span::styled(
@@ -560,10 +568,7 @@ fn render_raise_bar(
         }
     }
 
-    spans.push(Span::styled(
-        "BB",
-        Style::default().fg(BRIGHT_WHITE),
-    ));
+    spans.push(Span::styled("BB", Style::default().fg(BRIGHT_WHITE)));
 
     spans.push(Span::styled(
         format!(
@@ -616,14 +621,21 @@ fn render_action_log(frame: &mut Frame, app: &App, area: Rect) {
                 Line::from(vec![
                     Span::raw("  "),
                     Span::styled(
-                        format!("{:^width$}", entry.text, width = inner.width.saturating_sub(4) as usize),
+                        format!(
+                            "{:^width$}",
+                            entry.text,
+                            width = inner.width.saturating_sub(4) as usize
+                        ),
                         Style::default().fg(LOG_SEPARATOR),
                     ),
                 ])
             } else {
                 Line::from(vec![
                     Span::raw("  "),
-                    Span::styled(format!("{:>9}", entry.street), Style::default().fg(LOG_STREET)),
+                    Span::styled(
+                        format!("{:>9}", entry.street),
+                        Style::default().fg(LOG_STREET),
+                    ),
                     Span::styled(" │ ", Style::default().fg(LOG_SEPARATOR)),
                     Span::styled(entry.text.clone(), Style::default().fg(LOG_TEXT)),
                 ])
@@ -693,10 +705,7 @@ fn render_help_overlay(frame: &mut Frame) {
             Span::styled("Quit", desc_style),
         ]),
         Line::from(""),
-        Line::from(Span::styled(
-            "Press ? to close",
-            Style::default().fg(DIM),
-        )),
+        Line::from(Span::styled("Press ? to close", Style::default().fg(DIM))),
     ];
 
     let paragraph = Paragraph::new(lines).block(overlay_block("Help"));
@@ -787,10 +796,7 @@ fn render_showdown_overlay(frame: &mut Frame, app: &App) {
                 format!("Bot wins {}", format_bb(result.pot_won)),
                 ACTION_FOLD,
             ),
-            None => (
-                format!("Split pot — {}", format_bb(result.pot_won)),
-                GOLD,
-            ),
+            None => (format!("Split pot — {}", format_bb(result.pot_won)), GOLD),
         };
         lines.push(Line::from(""));
         lines.push(Line::from(Span::styled(

@@ -122,21 +122,19 @@ fn run_game_loop(
                             _ => {} // Ignore other keys during showdown
                         }
                     }
-                    GamePhase::Summary | GamePhase::SessionEnd => {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') => break,
-                            KeyCode::Char('n') | KeyCode::Char('N') => {
-                                if matches!(app.game_state.phase, GamePhase::SessionEnd) {
-                                    app.new_session();
-                                }
-                            }
-                            _ => {
-                                if matches!(app.game_state.phase, GamePhase::Summary) {
-                                    break;
-                                }
+                    GamePhase::Summary | GamePhase::SessionEnd => match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => break,
+                        KeyCode::Char('n') | KeyCode::Char('N') => {
+                            if matches!(app.game_state.phase, GamePhase::SessionEnd) {
+                                app.new_session();
                             }
                         }
-                    }
+                        _ => {
+                            if matches!(app.game_state.phase, GamePhase::Summary) {
+                                break;
+                            }
+                        }
+                    },
                     _ => {
                         if key.modifiers.contains(KeyModifiers::CONTROL)
                             && key.code == KeyCode::Char('c')
@@ -160,13 +158,13 @@ fn run_game_loop(
                             }
                             _ => {
                                 // Block gameplay input while events are pending or overlays are open
-                                if !app.has_pending_events()
-                                    && !app.show_help
-                                    && !app.show_stats
-                                {
-                                    if let Some(action) =
-                                        ui::input::handle_key(key, &app.game_state, &mut app.raise_input, &mut app.raise_mode)
-                                    {
+                                if !app.has_pending_events() && !app.show_help && !app.show_stats {
+                                    if let Some(action) = ui::input::handle_key(
+                                        key,
+                                        &app.game_state,
+                                        &mut app.raise_input,
+                                        &mut app.raise_mode,
+                                    ) {
                                         app.apply_player_action(action, stats_store);
                                     }
                                 }

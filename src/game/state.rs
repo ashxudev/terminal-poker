@@ -278,7 +278,8 @@ impl GameState {
             if self.last_aggressor.is_none() {
                 // No raise yet, BB gets option. Round complete only when BB has checked.
                 let bb_player = self.button.opponent();
-                return self.last_action
+                return self
+                    .last_action
                     .map(|(actor, action)| actor == bb_player && action == Action::Check)
                     .unwrap_or(false);
             }
@@ -423,7 +424,10 @@ impl GameState {
         self.to_act == Player::Human
             && !matches!(
                 self.phase,
-                GamePhase::Showdown | GamePhase::HandComplete | GamePhase::SessionEnd | GamePhase::Summary
+                GamePhase::Showdown
+                    | GamePhase::HandComplete
+                    | GamePhase::SessionEnd
+                    | GamePhase::Summary
             )
     }
 

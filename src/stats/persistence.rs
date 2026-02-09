@@ -16,15 +16,13 @@ impl StatsStore {
 
         let stats = if path.exists() {
             match fs::read_to_string(&path) {
-                Ok(contents) => {
-                    match serde_json::from_str(&contents) {
-                        Ok(stats) => stats,
-                        Err(e) => {
-                            eprintln!("Warning: Could not parse stats file, starting fresh: {}", e);
-                            PlayerStats::default()
-                        }
+                Ok(contents) => match serde_json::from_str(&contents) {
+                    Ok(stats) => stats,
+                    Err(e) => {
+                        eprintln!("Warning: Could not parse stats file, starting fresh: {}", e);
+                        PlayerStats::default()
                     }
-                }
+                },
                 Err(e) => {
                     eprintln!("Warning: Could not read stats file, starting fresh: {}", e);
                     PlayerStats::default()
