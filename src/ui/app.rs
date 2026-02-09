@@ -1,7 +1,29 @@
+use std::collections::VecDeque;
+use std::time::{Duration, Instant};
+
 use crate::bot::rule_based::RuleBasedBot;
 use crate::game::actions::Action;
 use crate::game::state::{GamePhase, GameState, Player};
 use crate::stats::persistence::StatsStore;
+
+const DELAY_BOT_ACTION_MS: u64 = 700;
+const DELAY_STREET_PAUSE_MS: u64 = 500;
+const DELAY_NEW_HAND_MS: u64 = 1200;
+const DELAY_DEAL_CARD_MS: u64 = 300;
+
+#[derive(Debug, Clone)]
+pub enum GameEvent {
+    BotAction,
+    DealCard,
+    StartNewHand,
+    RecordShowdownStats,
+}
+
+#[derive(Debug, Clone)]
+pub struct ActionLogEntry {
+    pub street: String,
+    pub text: String,
+}
 
 pub struct App {
     pub game_state: GameState,
@@ -10,7 +32,16 @@ pub struct App {
     pub show_stats: bool,
     pub raise_input: String,
     pub message: Option<String>,
+    pub action_log: Vec<ActionLogEntry>,
+    pub pending_events: VecDeque<GameEvent>,
+    pub next_event_at: Option<Instant>,
+    pub bot_thinking: bool,
+    pub bot_thinking_since: Option<Instant>,
+    pub phase_changed_at: Option<Instant>,
+    pub revealed_board_cards: usize,
+    pub raise_mode: bool,
     starting_stack_bb: u32,
+    last_phase: GamePhase,
     saw_flop_this_hand: bool,
     recorded_hand_this_round: bool,
     recorded_vpip_this_hand: bool,
@@ -18,14 +49,25 @@ pub struct App {
 
 impl App {
     pub fn new(starting_stack_bb: u32, aggression: f64) -> Self {
+        let game_state = GameState::new(starting_stack_bb);
+        let initial_phase = game_state.phase;
         Self {
-            game_state: GameState::new(starting_stack_bb),
+            game_state,
             bot: RuleBasedBot::new(aggression),
             show_help: false,
             show_stats: false,
             raise_input: String::new(),
             message: None,
+            action_log: Vec::new(),
+            pending_events: VecDeque::new(),
+            next_event_at: None,
+            bot_thinking: false,
+            bot_thinking_since: None,
+            phase_changed_at: None,
+            revealed_board_cards: 0,
+            raise_mode: false,
             starting_stack_bb,
+            last_phase: initial_phase,
             saw_flop_this_hand: false,
             recorded_hand_this_round: false,
             recorded_vpip_this_hand: false,
@@ -48,10 +90,44 @@ impl App {
 
     pub fn new_session(&mut self) {
         self.game_state = GameState::new(self.starting_stack_bb);
+        self.last_phase = self.game_state.phase;
         self.saw_flop_this_hand = false;
         self.recorded_hand_this_round = false;
         self.recorded_vpip_this_hand = false;
+        self.action_log.clear();
+        self.pending_events.clear();
+        self.next_event_at = None;
+        self.bot_thinking = false;
+        self.bot_thinking_since = None;
+        self.revealed_board_cards = 0;
+        self.raise_mode = false;
+        self.raise_input.clear();
         self.message = Some("New session started!".to_string());
+    }
+
+    pub fn has_pending_events(&self) -> bool {
+        !self.pending_events.is_empty()
+    }
+
+    fn phase_name(phase: GamePhase) -> &'static str {
+        match phase {
+            GamePhase::Preflop => "Pre-Flop",
+            GamePhase::Flop => "Flop",
+            GamePhase::Turn => "Turn",
+            GamePhase::River => "River",
+            _ => "",
+        }
+    }
+
+    fn log_action(&mut self, street: &str, text: String) {
+        self.action_log.push(ActionLogEntry {
+            street: street.to_string(),
+            text,
+        });
+        // Keep a reasonable history (visible area handles scrolling)
+        if self.action_log.len() > 100 {
+            self.action_log.drain(..50);
+        }
     }
 
     pub fn apply_player_action(&mut self, action: Action, stats: &mut StatsStore) {
@@ -91,79 +167,180 @@ impl App {
             self.recorded_vpip_this_hand = true;
         }
 
-        // Apply the action
-        self.game_state.apply_action(Player::Human, action);
-        self.message = Some(format!("You {}", action.description()));
+        self.raise_mode = false;
+        self.raise_input.clear();
 
-        // Check if we need bot action or hand is over
-        self.process_game_state(stats);
+        // Capture phase before apply_action (which may advance the phase)
+        let street = Self::phase_name(self.game_state.phase);
+        let desc = action.description_for("You");
+        self.game_state.apply_action(Player::Human, action);
+        self.log_action(street, format!("You {}", desc));
+        self.message = Some(format!("You {}", desc));
+
+        // Enqueue follow-up events
+        self.enqueue_next_events(stats);
     }
 
-    fn process_game_state(&mut self, stats: &mut StatsStore) {
-        loop {
-            // Track when player sees the flop (WTSD opportunity)
-            if !self.saw_flop_this_hand && self.game_state.board.len() >= 3 {
-                self.saw_flop_this_hand = true;
-                stats.record_saw_flop();
-            }
+    /// Inspect the current game state and enqueue exactly one pending event
+    /// with an appropriate delay. Does nothing if events are already pending.
+    pub fn enqueue_next_events(&mut self, stats: &mut StatsStore) {
+        if !self.pending_events.is_empty() {
+            return;
+        }
 
-            match self.game_state.phase {
-                GamePhase::HandComplete => {
-                    // Start next hand if both players have chips
-                    if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
-                        self.saw_flop_this_hand = false;
-                        self.recorded_hand_this_round = false;
-                        self.recorded_vpip_this_hand = false;
-                        self.game_state.start_new_hand();
-                        continue; // Let bot act if it's their turn
+        // Track flop stat
+        if !self.saw_flop_this_hand && self.game_state.board.len() >= 3 {
+            self.saw_flop_this_hand = true;
+            stats.record_saw_flop();
+        }
+
+        // Detect street transitions for extra pause
+        let phase_changed = self.game_state.phase != self.last_phase;
+        if phase_changed {
+            self.phase_changed_at = Some(Instant::now());
+            self.last_phase = self.game_state.phase;
+        }
+
+        match self.game_state.phase {
+            GamePhase::HandComplete => {
+                if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
+                    // Log the fold result
+                    if let Some((player, _)) = self.game_state.last_action {
+                        let winner_text = if player == Player::Bot {
+                            "You win the pot"
+                        } else {
+                            "Bot wins the pot"
+                        };
+                        self.log_action("", winner_text.to_string());
                     }
-                    break; // Session over (someone busted)
+                    self.pending_events.push_back(GameEvent::StartNewHand);
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(DELAY_NEW_HAND_MS));
                 }
-                GamePhase::Showdown => {
-                    // Record showdown stats
-                    if let Some(ref result) = self.game_state.showdown_result {
-                        let won = result.winner == Some(Player::Human);
-                        stats.record_showdown(won);
-                        if won {
-                            stats.record_pot_won(result.pot_won);
-                        } else if result.winner == Some(Player::Bot) {
-                            stats.record_pot_lost(result.pot_won);
-                        }
-                    }
-                    break;
-                }
-                GamePhase::SessionEnd | GamePhase::Summary => {
-                    stats.record_session_end();
-                    stats.record_profit((self.game_state.session_profit_bb() * 2.0).round() as i64);
-                    break;
-                }
-                _ => {
-                    if self.game_state.to_act == Player::Bot {
-                        let bot_action = self.bot.decide(&self.game_state);
-                        self.game_state.apply_action(Player::Bot, bot_action);
-                        self.message = Some(format!("Bot {}", bot_action.description()));
+                // else: session over, main loop detects busted stacks
+            }
+            GamePhase::Showdown => {
+                self.pending_events
+                    .push_back(GameEvent::RecordShowdownStats);
+                self.next_event_at = Some(Instant::now()); // immediate
+            }
+            GamePhase::SessionEnd | GamePhase::Summary => {
+                // Terminal states — nothing to enqueue
+            }
+            _ => {
+                // Reveal flop cards one at a time before any actions
+                let board_len = self.game_state.board.len();
+                if self.revealed_board_cards < board_len {
+                    self.pending_events.push_back(GameEvent::DealCard);
+                    let delay = if self.revealed_board_cards == 0 {
+                        DELAY_STREET_PAUSE_MS // first flop card gets a longer pause
                     } else {
-                        break;
-                    }
+                        DELAY_DEAL_CARD_MS
+                    };
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(delay));
+                    return;
                 }
+
+                if self.game_state.to_act == Player::Bot {
+                    let delay = if phase_changed {
+                        DELAY_STREET_PAUSE_MS + DELAY_BOT_ACTION_MS
+                    } else {
+                        DELAY_BOT_ACTION_MS
+                    };
+                    self.pending_events.push_back(GameEvent::BotAction);
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(delay));
+                    self.bot_thinking = true;
+                    self.bot_thinking_since = Some(Instant::now());
+                }
+                // else: player's turn, wait for input
             }
         }
     }
 
-    pub fn initialize(&mut self, stats: &mut StatsStore) {
-        self.process_game_state(stats);
-    }
+    /// Process the next pending event if its delay has elapsed.
+    /// Called every iteration of the main loop.
+    pub fn process_next_event(&mut self, stats: &mut StatsStore) {
+        let event_time = match self.next_event_at {
+            Some(t) => t,
+            None => return,
+        };
+        if Instant::now() < event_time {
+            return;
+        }
 
-    pub fn continue_after_showdown(&mut self) {
-        if self.game_state.phase == GamePhase::Showdown {
-            if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
+        let event = match self.pending_events.pop_front() {
+            Some(e) => e,
+            None => {
+                self.next_event_at = None;
+                return;
+            }
+        };
+
+        match event {
+            GameEvent::BotAction => {
+                self.bot_thinking = false;
+                self.bot_thinking_since = None;
+                let street = Self::phase_name(self.game_state.phase);
+                let bot_action = self.bot.decide(&self.game_state);
+                let desc = bot_action.description_for("Bot");
+                self.game_state.apply_action(Player::Bot, bot_action);
+                self.log_action(street, format!("Bot {}", desc));
+                self.message = Some(format!("Bot {}", desc));
+            }
+            GameEvent::DealCard => {
+                self.revealed_board_cards += 1;
+            }
+            GameEvent::StartNewHand => {
                 self.saw_flop_this_hand = false;
                 self.recorded_hand_this_round = false;
                 self.recorded_vpip_this_hand = false;
+                self.revealed_board_cards = 0;
+                self.raise_mode = false;
+                self.raise_input.clear();
                 self.game_state.start_new_hand();
+                self.last_phase = self.game_state.phase;
+                // Add a separator for the new hand in the historical log
+                self.action_log.push(ActionLogEntry {
+                    street: String::new(),
+                    text: format!("── Hand #{} ──", self.game_state.hand_number),
+                });
+            }
+            GameEvent::RecordShowdownStats => {
+                if let Some(ref result) = self.game_state.showdown_result {
+                    let won = result.winner == Some(Player::Human);
+                    stats.record_showdown(won);
+                    if won {
+                        stats.record_pot_won(result.pot_won);
+                    } else if result.winner == Some(Player::Bot) {
+                        stats.record_pot_lost(result.pot_won);
+                    }
+                }
+                self.next_event_at = None;
+                return; // Don't enqueue follow-ups; showdown waits for user keypress
+            }
+        }
+
+        // Clear timer and check what to do next
+        self.next_event_at = None;
+        self.enqueue_next_events(stats);
+    }
+
+    pub fn initialize(&mut self, stats: &mut StatsStore) {
+        self.enqueue_next_events(stats);
+    }
+
+    pub fn continue_after_showdown(&mut self, _stats: &mut StatsStore) {
+        if self.game_state.phase == GamePhase::Showdown {
+            if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
+                self.pending_events.push_back(GameEvent::StartNewHand);
+                self.next_event_at = Some(Instant::now()); // immediate — user pressed key
             } else {
                 self.game_state.phase = GamePhase::SessionEnd;
             }
+            // Ensure follow-up events get scheduled after the new hand starts
+            // (handled by process_next_event -> enqueue_next_events chain)
         }
     }
 }

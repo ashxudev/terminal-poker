@@ -103,7 +103,7 @@ impl GameState {
             player_bet: 0,
             bot_bet: 0,
             to_act: Player::Human,
-            button: Player::Human,
+            button: Player::Bot,
             last_aggressor: None,
             last_raise_size: BIG_BLIND,
             hand_number: 0,

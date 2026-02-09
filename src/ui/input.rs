@@ -1,19 +1,24 @@
 use crate::game::actions::Action;
-use crate::game::state::{GameState, Player};
+use crate::game::state::{GameState, Player, BIG_BLIND};
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(
     key: KeyEvent,
     game_state: &GameState,
     raise_input: &mut String,
+    raise_mode: &mut bool,
 ) -> Option<Action> {
     if !game_state.is_player_turn() {
         return None;
     }
 
     let available = game_state.available_actions();
-    let to_call = game_state.amount_to_call(Player::Human);
     let stack = game_state.player_stack;
+
+    // When in raise mode, only raise-related keys are accepted
+    if *raise_mode {
+        return handle_raise_mode_key(key, game_state, raise_input, raise_mode);
+    }
 
     match key.code {
         // Fold
@@ -54,77 +59,11 @@ pub fn handle_key(
             }
         }
 
-        // Raise/Bet - enter raise mode or use last input
+        // Enter raise mode
         KeyCode::Char('r') | KeyCode::Char('R') => {
-            if !raise_input.is_empty() {
-                if let Ok(amount) = raise_input.parse::<u32>() {
-                    raise_input.clear();
-                    let min_raise = available.min_raise.unwrap_or(available.min_bet.unwrap_or(2));
-                    let max_bet = game_state.player_bet + stack;
-                    let actual = amount.max(min_raise).min(max_bet);
-                    if actual >= max_bet {
-                        return Some(Action::AllIn(max_bet));
-                    }
-                    if to_call > 0 {
-                        return Some(Action::Raise(actual));
-                    } else {
-                        return Some(Action::Bet(actual));
-                    }
-                }
-            }
-            None
-        }
-
-        // Pot-sized bet shortcuts - MUST come before general digit handler
-        KeyCode::Char('1') if raise_input.is_empty() => {
-            // 33% pot raise
-            let raise_size = (game_state.pot as f64 * 0.33) as u32;
-            pot_sized_action(raise_size, &available, game_state.player_bet, stack, to_call)
-        }
-        KeyCode::Char('2') if raise_input.is_empty() => {
-            // 50% pot raise
-            let raise_size = (game_state.pot as f64 * 0.5) as u32;
-            pot_sized_action(raise_size, &available, game_state.player_bet, stack, to_call)
-        }
-        KeyCode::Char('3') if raise_input.is_empty() => {
-            // 67% pot raise
-            let raise_size = (game_state.pot as f64 * 0.67) as u32;
-            pot_sized_action(raise_size, &available, game_state.player_bet, stack, to_call)
-        }
-        KeyCode::Char('4') if raise_input.is_empty() => {
-            // 100% pot raise
-            pot_sized_action(game_state.pot, &available, game_state.player_bet, stack, to_call)
-        }
-
-        // Numeric input for raise amount - AFTER specific shortcuts
-        KeyCode::Char(c) if c.is_ascii_digit() => {
-            raise_input.push(c);
-            None
-        }
-
-        // Backspace to clear raise input
-        KeyCode::Backspace => {
-            raise_input.pop();
-            None
-        }
-
-        // Enter to submit raise
-        KeyCode::Enter => {
-            if !raise_input.is_empty() {
-                if let Ok(amount) = raise_input.parse::<u32>() {
-                    raise_input.clear();
-                    let min_raise = available.min_raise.unwrap_or(available.min_bet.unwrap_or(2));
-                    let max_bet = game_state.player_bet + stack;
-                    let actual = amount.max(min_raise).min(max_bet);
-                    if actual >= max_bet {
-                        return Some(Action::AllIn(max_bet));
-                    }
-                    if to_call > 0 {
-                        return Some(Action::Raise(actual));
-                    } else {
-                        return Some(Action::Bet(actual));
-                    }
-                }
+            if available.min_raise.is_some() || available.min_bet.is_some() {
+                *raise_mode = true;
+                raise_input.clear();
             }
             None
         }
@@ -133,30 +72,108 @@ pub fn handle_key(
     }
 }
 
-/// Creates a pot-sized bet or raise action.
-/// `raise_size` is the amount to raise BY (X% of pot), not the total.
-fn pot_sized_action(
-    raise_size: u32,
-    available: &crate::game::actions::AvailableActions,
-    player_bet: u32,
-    stack: u32,
-    to_call: u32,
+fn handle_raise_mode_key(
+    key: KeyEvent,
+    game_state: &GameState,
+    raise_input: &mut String,
+    raise_mode: &mut bool,
 ) -> Option<Action> {
-    let min_raise = available.min_raise.unwrap_or(available.min_bet.unwrap_or(2));
-    let max_bet = player_bet + stack;
+    let available = game_state.available_actions();
+    let to_call = game_state.amount_to_call(Player::Human);
+    let stack = game_state.player_stack;
 
-    // Calculate raise-to amount: current max bet + raise size
-    // current_max_bet = player_bet + to_call (what opponent has bet)
-    let current_max_bet = player_bet + to_call;
-    let raise_to = (current_max_bet + raise_size).max(min_raise).min(max_bet);
+    match key.code {
+        // Digits: append to BB input
+        KeyCode::Char(c) if c.is_ascii_digit() => {
+            raise_input.push(c);
+            None
+        }
 
-    if raise_to >= max_bet {
-        return Some(Action::AllIn(max_bet));
+        // Backspace: delete last digit
+        KeyCode::Backspace => {
+            raise_input.pop();
+            None
+        }
+
+        // Up arrow: +1BB
+        KeyCode::Up => {
+            let current_bb = raise_input.parse::<u32>().unwrap_or(0);
+            let min_bb = min_raise_bb(&available);
+            let max_bb = (game_state.player_bet + stack) / BIG_BLIND;
+            let new_bb = (current_bb + 1).min(max_bb).max(min_bb);
+            *raise_input = new_bb.to_string();
+            None
+        }
+
+        // Down arrow: -1BB
+        KeyCode::Down => {
+            let current_bb = raise_input.parse::<u32>().unwrap_or(0);
+            let min_bb = min_raise_bb(&available);
+            let new_bb = if current_bb > min_bb {
+                current_bb - 1
+            } else {
+                min_bb
+            };
+            *raise_input = new_bb.to_string();
+            None
+        }
+
+        // Enter or R: confirm raise
+        KeyCode::Enter | KeyCode::Char('r') | KeyCode::Char('R') => {
+            if let Some(action) = submit_raise(raise_input, game_state, &available, to_call, stack)
+            {
+                *raise_mode = false;
+                raise_input.clear();
+                return Some(action);
+            }
+            None
+        }
+
+        // Escape: cancel raise mode
+        KeyCode::Esc => {
+            *raise_mode = false;
+            raise_input.clear();
+            None
+        }
+
+        // All other keys ignored in raise mode
+        _ => None,
+    }
+}
+
+fn min_raise_bb(available: &crate::game::actions::AvailableActions) -> u32 {
+    let min_chips = available
+        .min_raise
+        .unwrap_or(available.min_bet.unwrap_or(BIG_BLIND));
+    // Convert chips to BB, rounding up
+    (min_chips + BIG_BLIND - 1) / BIG_BLIND
+}
+
+fn submit_raise(
+    raise_input: &str,
+    game_state: &GameState,
+    available: &crate::game::actions::AvailableActions,
+    to_call: u32,
+    stack: u32,
+) -> Option<Action> {
+    let typed_bb = raise_input.parse::<u32>().ok()?;
+    if typed_bb == 0 {
+        return None;
     }
 
-    if available.can_call.is_some() {
-        Some(Action::Raise(raise_to))
+    let chips = typed_bb * BIG_BLIND;
+    let min_raise = available
+        .min_raise
+        .unwrap_or(available.min_bet.unwrap_or(BIG_BLIND));
+    let max_bet = game_state.player_bet + stack;
+
+    let actual = chips.max(min_raise).min(max_bet);
+
+    if actual >= max_bet {
+        Some(Action::AllIn(max_bet))
+    } else if to_call > 0 {
+        Some(Action::Raise(actual))
     } else {
-        Some(Action::Bet(raise_to))
+        Some(Action::Bet(actual))
     }
 }
