@@ -185,7 +185,7 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Length(1),  // [4]  Opponent stack
             Constraint::Length(5),  // [5]  Opponent cards
             Constraint::Fill(1),   // [6]  Spacer (opponent cards → table)
-            Constraint::Min(11),   // [7]  Board box (protected)
+            Constraint::Min(12),   // [7]  Board box (protected)
             Constraint::Fill(1),   // [8]  Spacer (table → player label)
             Constraint::Length(1),  // [9]  Player label
             Constraint::Fill(1),   // [10] Spacer
@@ -314,6 +314,21 @@ fn render_opponent_cards(frame: &mut Frame, app: &App, area: Rect) {
 
 // ── Board Box (bordered, green felt, pot + to-call inside) ──
 
+fn render_bet_chips(frame: &mut Frame, bet: u32, area: Rect) {
+    if bet > 0 {
+        let line = Line::from(vec![
+            Span::styled("● ", Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN)),
+            Span::styled(format_bb(bet), Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN)),
+        ]);
+        frame.render_widget(
+            Paragraph::new(line)
+                .alignment(Alignment::Center)
+                .style(Style::default().bg(FELT_GREEN)),
+            area,
+        );
+    }
+}
+
 fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .borders(Borders::ALL)
@@ -324,26 +339,29 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let inner = block.inner(area);
     frame.render_widget(block, area);
 
-    // Split inner (9 rows): info header (2) + cards (5) + bottom pad (2)
-    // Equal padding above and below cards for vertical centering
+    // Split inner (10 rows): opp bet (1) + spacer (1) + pot info (1) + cards (5) + spacer (1) + player bet (1)
     let inner_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2), // info line + blank
-            Constraint::Length(5), // cards
-            Constraint::Length(2), // bottom padding
+            Constraint::Length(1), // opponent bet chips
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // pot info
+            Constraint::Length(5), // community cards
+            Constraint::Length(1), // spacer
+            Constraint::Length(1), // player bet chips
         ])
         .split(inner);
 
-    // Pot + To Call info line (first row of the 2-row header)
-    let info_area = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Length(1),
-        ])
-        .split(inner_chunks[0]);
+    // Bet chips (only during active betting phases)
+    let show_bets = matches!(
+        app.game_state.phase,
+        GamePhase::Preflop | GamePhase::Flop | GamePhase::Turn | GamePhase::River
+    );
+    if show_bets {
+        render_bet_chips(frame, app.game_state.bot_bet, inner_chunks[0]);
+    }
 
+    // Pot + To Call info line
     let pot_style = Style::default()
         .fg(GOLD_BRIGHT)
         .add_modifier(Modifier::BOLD);
@@ -364,7 +382,7 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     }
 
     let info_line = Paragraph::new(Line::from(info_spans)).alignment(Alignment::Center);
-    frame.render_widget(info_line, info_area[0]);
+    frame.render_widget(info_line, inner_chunks[2]);
 
     // Community cards
     let board = &app.game_state.board;
@@ -380,7 +398,11 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
 
     let card_lines = compose_card_row(&card_data, " ");
     let paragraph = Paragraph::new(card_lines).alignment(Alignment::Center);
-    frame.render_widget(paragraph, inner_chunks[1]);
+    frame.render_widget(paragraph, inner_chunks[3]);
+
+    if show_bets {
+        render_bet_chips(frame, app.game_state.player_bet, inner_chunks[5]);
+    }
 }
 
 // ── Player Info ────────────────────────────────────────────
