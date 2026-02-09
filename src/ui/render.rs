@@ -27,7 +27,6 @@ const ACTION_CALL: Color = Color::Rgb(80, 180, 220);
 const ACTION_RAISE: Color = Color::Rgb(220, 180, 40);
 const ACTION_ALLIN: Color = Color::Rgb(200, 100, 220);
 const DIM: Color = Color::DarkGray;
-const PHASE_COLOR: Color = Color::Rgb(100, 160, 220);
 const BTN_COLOR: Color = Color::Rgb(220, 160, 40);
 const OVERLAY_BG: Color = Color::Rgb(20, 20, 30);
 const OVERLAY_BORDER: Color = Color::Rgb(100, 100, 140);
@@ -237,17 +236,6 @@ pub fn render(frame: &mut Frame, app: &App) {
 // ── Status Bar ─────────────────────────────────────────────
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
-    let phase_name = match app.game_state.phase {
-        GamePhase::Preflop => "Pre-Flop",
-        GamePhase::Flop => "Flop",
-        GamePhase::Turn => "Turn",
-        GamePhase::River => "River",
-        GamePhase::Showdown => "Showdown",
-        GamePhase::HandComplete => "Hand Complete",
-        GamePhase::SessionEnd => "Session End",
-        GamePhase::Summary => "Summary",
-    };
-
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -261,24 +249,10 @@ fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
         Span::styled(" Hand ", Style::default().fg(DIM)),
         Span::styled(
             format!("#{}", app.game_state.hand_number),
-            Style::default().fg(Color::White),
+            Style::default().fg(DIM),
         ),
     ]));
     frame.render_widget(hand_num, cols[0]);
-
-    // Flash the phase name in gold briefly after a street transition
-    let phase_highlight = app
-        .phase_changed_at
-        .map(|t| t.elapsed().as_millis() < 800)
-        .unwrap_or(false);
-    let phase_color = if phase_highlight { GOLD_BRIGHT } else { PHASE_COLOR };
-
-    let phase = Paragraph::new(Line::from(Span::styled(
-        format!("● {}", phase_name),
-        Style::default().fg(phase_color).add_modifier(Modifier::BOLD),
-    )))
-    .alignment(Alignment::Center);
-    frame.render_widget(phase, cols[1]);
 
     let controls = Paragraph::new(Line::from(vec![
         Span::styled("S", Style::default().fg(Color::Blue)),
@@ -392,12 +366,11 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let info_line = Paragraph::new(Line::from(info_spans)).alignment(Alignment::Center);
     frame.render_widget(info_line, info_area[0]);
 
-    // Community cards (only show up to revealed_board_cards for animation)
+    // Community cards
     let board = &app.game_state.board;
-    let visible = app.revealed_board_cards.min(board.len());
     let card_data: Vec<[Line<'static>; 5]> = (0..5)
         .map(|i| {
-            if i < visible {
+            if i < board.len() {
                 render_card_lines(&board[i])
             } else {
                 render_empty_slot_lines()
@@ -514,28 +487,6 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
         spans.push(Span::styled(
             " A All-in ",
             Style::default().fg(Color::White).bg(ACTION_ALLIN),
-        ));
-    } else if app.bot_thinking {
-        let dots = app
-            .bot_thinking_since
-            .map(|t| {
-                let cycle = (t.elapsed().as_millis() / 350) % 4;
-                match cycle {
-                    1 => ".",
-                    2 => "..",
-                    3 => "...",
-                    _ => "",
-                }
-            })
-            .unwrap_or("");
-        spans.push(Span::styled(
-            format!("  Bot is thinking{}", dots),
-            Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
-        ));
-    } else {
-        spans.push(Span::styled(
-            "  Waiting...",
-            Style::default().fg(DIM),
         ));
     }
 
