@@ -37,10 +37,25 @@ impl RuleBasedBot {
         // Decision logic
         if to_call == 0 {
             // Can check - decide whether to bet/raise
-            self.decide_bet(adjusted_threshold, stack, state.pot, state.bot_bet, is_preflop, min_raise_to)
+            self.decide_bet(
+                adjusted_threshold,
+                stack,
+                state.pot,
+                state.bot_bet,
+                is_preflop,
+                min_raise_to,
+            )
         } else {
             // Facing a bet
-            self.decide_facing_bet(adjusted_threshold, pot_odds, to_call, stack, state.pot, state.bot_bet, min_raise_to)
+            self.decide_facing_bet(
+                adjusted_threshold,
+                pot_odds,
+                to_call,
+                stack,
+                state.pot,
+                state.bot_bet,
+                min_raise_to,
+            )
         }
     }
 
@@ -78,7 +93,15 @@ impl RuleBasedBot {
         }
     }
 
-    fn decide_bet(&self, threshold: f64, stack: u32, pot: u32, bot_bet: u32, is_preflop: bool, min_raise_to: Option<u32>) -> Action {
+    fn decide_bet(
+        &self,
+        threshold: f64,
+        stack: u32,
+        pot: u32,
+        bot_bet: u32,
+        is_preflop: bool,
+        min_raise_to: Option<u32>,
+    ) -> Action {
         // If no bet/raise is available, just check
         let min_raise_to = match min_raise_to {
             Some(v) => v,

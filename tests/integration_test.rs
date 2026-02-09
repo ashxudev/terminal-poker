@@ -65,8 +65,8 @@ mod state_machine_tests {
     #[test]
     fn test_full_hand_to_showdown() {
         // This tests the core game logic path
-        use terminal_poker::game::state::{GameState, Player, GamePhase};
         use terminal_poker::game::actions::Action;
+        use terminal_poker::game::state::{GamePhase, GameState, Player};
 
         let mut state = GameState::new(100);
 
@@ -79,7 +79,10 @@ mod state_machine_tests {
         // Both players call/check to showdown
         // This simulates a passive hand
         let mut iterations = 0;
-        while !matches!(state.phase, GamePhase::Showdown | GamePhase::HandComplete | GamePhase::SessionEnd) {
+        while !matches!(
+            state.phase,
+            GamePhase::Showdown | GamePhase::HandComplete | GamePhase::SessionEnd
+        ) {
             iterations += 1;
             if iterations > 100 {
                 panic!("Game loop stuck");
@@ -104,8 +107,8 @@ mod state_machine_tests {
 
     #[test]
     fn test_fold_ends_hand() {
-        use terminal_poker::game::state::{GameState, Player, GamePhase};
         use terminal_poker::game::actions::Action;
+        use terminal_poker::game::state::{GamePhase, GameState, Player};
 
         let mut state = GameState::new(100);
 
@@ -209,8 +212,8 @@ mod hand_eval_tests {
 #[cfg(test)]
 mod bot_tests {
     use terminal_poker::bot::rule_based::RuleBasedBot;
-    use terminal_poker::game::state::GameState;
     use terminal_poker::game::actions::Action;
+    use terminal_poker::game::state::GameState;
 
     #[test]
     fn test_bot_always_returns_valid_action() {
@@ -222,8 +225,12 @@ mod bot_tests {
             let action = bot.decide(&state);
             // Should never panic and should return a valid action
             match action {
-                Action::Fold | Action::Check | Action::Call(_) |
-                Action::Bet(_) | Action::Raise(_) | Action::AllIn(_) => {}
+                Action::Fold
+                | Action::Check
+                | Action::Call(_)
+                | Action::Bet(_)
+                | Action::Raise(_)
+                | Action::AllIn(_) => {}
             }
         }
     }
@@ -242,15 +249,19 @@ mod bot_tests {
         }
 
         // Passive bot should rarely bet/raise
-        assert!(aggressive_actions < 25, "Passive bot too aggressive: {}", aggressive_actions);
+        assert!(
+            aggressive_actions < 25,
+            "Passive bot too aggressive: {}",
+            aggressive_actions
+        );
     }
 }
 
 // Regression tests for betting logic bugs
 #[cfg(test)]
 mod betting_logic_tests {
-    use terminal_poker::game::state::{GameState, Player, GamePhase, BIG_BLIND};
     use terminal_poker::game::actions::Action;
+    use terminal_poker::game::state::{GamePhase, GameState, Player, BIG_BLIND};
 
     /// Tests that last_raise_size is correctly calculated after a bet.
     /// Regression test for bug where last_raise_size was calculated AFTER
@@ -278,8 +289,10 @@ mod betting_logic_tests {
         state.apply_action(actor, Action::Bet(10));
 
         // last_raise_size should be 10 (the bet amount minus old max of 0)
-        assert_eq!(state.last_raise_size, 10,
-            "last_raise_size should be 10 after a bet of 10 from 0");
+        assert_eq!(
+            state.last_raise_size, 10,
+            "last_raise_size should be 10 after a bet of 10 from 0"
+        );
     }
 
     /// Tests that last_raise_size is correctly calculated after a raise.
@@ -310,8 +323,10 @@ mod betting_logic_tests {
         state.apply_action(second_actor, Action::Raise(30));
 
         // last_raise_size should be 20 (30 - 10)
-        assert_eq!(state.last_raise_size, 20,
-            "last_raise_size should be 20 after raising from 10 to 30");
+        assert_eq!(
+            state.last_raise_size, 20,
+            "last_raise_size should be 20 after raising from 10 to 30"
+        );
     }
 
     /// Tests that minimum raise calculation works correctly.
@@ -339,8 +354,11 @@ mod betting_logic_tests {
 
         // Now first player faces a raise, min re-raise should be 30 + 20 = 50
         let available = state.available_actions();
-        assert_eq!(available.min_raise, Some(50),
-            "After a raise to 30 (raise of 20), min re-raise should be 50");
+        assert_eq!(
+            available.min_raise,
+            Some(50),
+            "After a raise to 30 (raise of 20), min re-raise should be 50"
+        );
     }
 
     /// Tests that last_raise_size is correctly calculated for all-in raises.
@@ -374,17 +392,19 @@ mod betting_logic_tests {
 
         // last_raise_size should be allin_amount - old_max
         let expected_raise_size = allin_amount - old_max;
-        assert_eq!(state.last_raise_size, expected_raise_size,
+        assert_eq!(
+            state.last_raise_size, expected_raise_size,
             "last_raise_size should be {} after all-in of {} over bet of {}",
-            expected_raise_size, allin_amount, old_max);
+            expected_raise_size, allin_amount, old_max
+        );
     }
 }
 
 // Regression tests for split pot logic
 #[cfg(test)]
 mod split_pot_tests {
-    use terminal_poker::game::state::{GameState, Player};
     use terminal_poker::game::deck::{Card, Rank, Suit};
+    use terminal_poker::game::state::{GameState, Player};
 
     /// Tests that odd chip in split pot goes to the out-of-position player.
     /// This is the player who is NOT the button (acts first postflop).

@@ -47,11 +47,7 @@ pub fn evaluate_hand(hole_cards: &[Card], board: &[Card]) -> HandEvaluation {
     combos
         .into_iter()
         .map(|combo| evaluate_five(&combo))
-        .max_by(|a, b| {
-            a.rank
-                .cmp(&b.rank)
-                .then_with(|| a.kickers.cmp(&b.kickers))
-        })
+        .max_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.kickers.cmp(&b.kickers)))
         .unwrap_or_else(|| HandEvaluation {
             rank: HandRank::HighCard,
             kickers: vec![],
@@ -253,7 +249,10 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
     HandEvaluation {
         rank: HandRank::HighCard,
         kickers: ranks,
-        description: format!("{} high", rank_name(cards.iter().map(|c| c.rank).max().unwrap())),
+        description: format!(
+            "{} high",
+            rank_name(cards.iter().map(|c| c.rank).max().unwrap())
+        ),
     }
 }
 

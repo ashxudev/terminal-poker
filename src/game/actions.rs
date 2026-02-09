@@ -49,12 +49,40 @@ impl Action {
     pub fn description_for(&self, actor: &str) -> String {
         let is_you = actor == "You";
         match self {
-            Action::Fold => if is_you { "fold".into() } else { "folds".into() },
-            Action::Check => if is_you { "check".into() } else { "checks".into() },
-            Action::Call(amt) => format!("{} {}", if is_you { "call" } else { "calls" }, format_bb(*amt)),
-            Action::Bet(amt) => format!("{} {}", if is_you { "bet" } else { "bets" }, format_bb(*amt)),
-            Action::Raise(amt) => format!("{} to {}", if is_you { "raise" } else { "raises" }, format_bb(*amt)),
-            Action::AllIn(amt) => format!("{} for {}", if is_you { "all-in" } else { "all-in" }, format_bb(*amt)),
+            Action::Fold => {
+                if is_you {
+                    "fold".into()
+                } else {
+                    "folds".into()
+                }
+            }
+            Action::Check => {
+                if is_you {
+                    "check".into()
+                } else {
+                    "checks".into()
+                }
+            }
+            Action::Call(amt) => format!(
+                "{} {}",
+                if is_you { "call" } else { "calls" },
+                format_bb(*amt)
+            ),
+            Action::Bet(amt) => format!(
+                "{} {}",
+                if is_you { "bet" } else { "bets" },
+                format_bb(*amt)
+            ),
+            Action::Raise(amt) => format!(
+                "{} to {}",
+                if is_you { "raise" } else { "raises" },
+                format_bb(*amt)
+            ),
+            Action::AllIn(amt) => format!(
+                "{} for {}",
+                if is_you { "all-in" } else { "all-in" },
+                format_bb(*amt)
+            ),
         }
     }
 }
@@ -71,12 +99,7 @@ pub struct AvailableActions {
 }
 
 impl AvailableActions {
-    pub fn new(
-        to_call: u32,
-        min_raise_to: u32,
-        player_stack: u32,
-        big_blind: u32,
-    ) -> Self {
+    pub fn new(to_call: u32, min_raise_to: u32, player_stack: u32, big_blind: u32) -> Self {
         let can_check = to_call == 0;
         let can_call = if to_call > 0 && to_call < player_stack {
             Some(to_call)

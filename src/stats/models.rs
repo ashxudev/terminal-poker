@@ -7,8 +7,8 @@ pub struct PlayerStats {
     pub total_sessions: u64,
 
     // Preflop stats
-    pub vpip_hands: u64,      // Voluntarily put $ in pot
-    pub pfr_hands: u64,       // Preflop raise
+    pub vpip_hands: u64, // Voluntarily put $ in pot
+    pub pfr_hands: u64,  // Preflop raise
     pub three_bet_opportunities: u64,
     pub three_bet_hands: u64,
 
@@ -125,12 +125,14 @@ pub const STAT_DEFINITIONS: &[StatDefinition] = &[
     StatDefinition {
         abbrev: "VPIP",
         name: "Voluntarily Put $ In Pot",
-        explanation: "% of hands where you voluntarily put money in preflop (calls or raises, not blinds)",
+        explanation:
+            "% of hands where you voluntarily put money in preflop (calls or raises, not blinds)",
     },
     StatDefinition {
         abbrev: "PFR",
         name: "Pre-Flop Raise",
-        explanation: "% of hands where you raised preflop. Should be close to VPIP for tight-aggressive play",
+        explanation:
+            "% of hands where you raised preflop. Should be close to VPIP for tight-aggressive play",
     },
     StatDefinition {
         abbrev: "3Bet",
