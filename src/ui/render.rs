@@ -1,3 +1,4 @@
+use crate::game::actions::Action;
 use crate::game::deck::Card;
 use crate::game::state::{GamePhase, Player, BIG_BLIND};
 use crate::stats::models::STAT_DEFINITIONS;
@@ -25,7 +26,12 @@ const ACTION_FOLD: Color = Color::Rgb(200, 60, 60);
 const ACTION_CHECK: Color = Color::Rgb(80, 200, 80);
 const ACTION_CALL: Color = Color::Rgb(80, 180, 220);
 const ACTION_RAISE: Color = Color::Rgb(220, 180, 40);
-const ACTION_ALLIN: Color = Color::Rgb(200, 100, 220);
+// Darker button backgrounds for white-text contrast across terminals
+const ACTION_FOLD_BG: Color = Color::Rgb(140, 35, 35);
+const ACTION_CHECK_BG: Color = Color::Rgb(45, 130, 45);
+const ACTION_CALL_BG: Color = Color::Rgb(40, 120, 160);
+const ACTION_RAISE_BG: Color = Color::Rgb(160, 120, 15);
+const ACTION_ALLIN_BG: Color = Color::Rgb(140, 55, 160);
 const DIM: Color = Color::DarkGray;
 const BTN_COLOR: Color = Color::Rgb(220, 160, 40);
 const OVERLAY_BG: Color = Color::Rgb(20, 20, 30);
@@ -74,7 +80,7 @@ fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
         Line::from(Span::styled("┌─────┐", border_style)),
         Line::from(vec![
             Span::styled("│", border_style),
-            Span::styled("  ", bg_style),
+            Span::styled(if rank.len() > 1 { " " } else { "  " }, bg_style),
             Span::styled(rank.to_string(), face_style),
             Span::styled("  ", bg_style),
             Span::styled("│", border_style),
@@ -185,18 +191,20 @@ pub fn render(frame: &mut Frame, app: &App) {
             Constraint::Fill(1),   // [3]  Spacer
             Constraint::Length(1), // [4]  Opponent stack
             Constraint::Length(5), // [5]  Opponent cards
-            Constraint::Fill(1),   // [6]  Spacer (opponent cards → table)
-            Constraint::Min(12),   // [7]  Board box (protected)
-            Constraint::Fill(1),   // [8]  Spacer (table → player label)
-            Constraint::Length(1), // [9]  Player label
+            Constraint::Fill(1),   // [6]  Spacer
+            Constraint::Length(1), // [7]  Bot action indicator
+            Constraint::Fill(1),   // [8]  Spacer
+            Constraint::Min(12),   // [9]  Board box (protected)
             Constraint::Fill(1),   // [10] Spacer
-            Constraint::Length(5), // [11] Player cards
+            Constraint::Length(1), // [11] Player action indicator
             Constraint::Fill(1),   // [12] Spacer
-            Constraint::Length(1), // [13] Player stack
+            Constraint::Length(5), // [13] Player cards
             Constraint::Fill(1),   // [14] Spacer
-            Constraint::Length(1), // [15] Action bar
-            Constraint::Length(1), // [16] Quick bets / raise input
-            Constraint::Min(5),    // [17] Action log (bordered box)
+            Constraint::Length(1), // [15] Player stack
+            Constraint::Fill(1),   // [16] Spacer
+            Constraint::Length(1), // [17] Action bar
+            Constraint::Length(1), // [18] Quick bets / raise input
+            Constraint::Min(5),    // [19] Action log (bordered box)
         ])
         .split(inner_area);
 
@@ -206,18 +214,33 @@ pub fn render(frame: &mut Frame, app: &App) {
     // chunks[3] = spacer
     render_opponent_stack(frame, app, chunks[4]);
     render_opponent_cards(frame, app, chunks[5]);
-    // chunks[6] = spacer (opponent cards → table)
-    render_board_box(frame, app, chunks[7]);
-    // chunks[8] = spacer (table → player label)
-    render_player_label(frame, app, chunks[9]);
+    // chunks[6] = spacer
+    // chunks[7] = bot action indicator / showdown result
+    if app.showdown_result_shown {
+        if let Some(ref result) = app.game_state.showdown_result {
+            let line = showdown_indicator_line(result.winner, Player::Bot, &result.bot_hand.description);
+            frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), chunks[7]);
+        }
+    } else if let Some(ref action) = app.bot_last_action {
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            action_label(action),
+            Style::default().fg(Color::Rgb(255, 255, 255)),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(paragraph, chunks[7]);
+    }
+    // chunks[8] = spacer
+    render_board_box(frame, app, chunks[9]);
     // chunks[10] = spacer
-    render_player_cards(frame, app, chunks[11]);
+    render_player_label(frame, app, chunks[11]);
     // chunks[12] = spacer
-    render_player_stack(frame, app, chunks[13]);
+    render_player_cards(frame, app, chunks[13]);
     // chunks[14] = spacer
-    render_action_bar(frame, app, chunks[15]);
-    render_raise_row(frame, app, chunks[16]);
-    render_action_log(frame, app, chunks[17]);
+    render_player_stack(frame, app, chunks[15]);
+    // chunks[16] = spacer
+    render_action_bar(frame, app, chunks[17]);
+    render_raise_row(frame, app, chunks[18]);
+    render_action_log(frame, app, chunks[19]);
 
     // Overlays (mutually exclusive — stats/help take priority over phase overlays)
     if app.show_stats {
@@ -226,7 +249,6 @@ pub fn render(frame: &mut Frame, app: &App) {
         render_help_overlay(frame);
     } else {
         match app.game_state.phase {
-            GamePhase::Showdown => render_showdown_overlay(frame, app),
             GamePhase::SessionEnd => render_session_end_overlay(frame, app),
             GamePhase::Summary => render_summary_overlay(frame, app),
             _ => {}
@@ -295,8 +317,7 @@ fn render_opponent_stack(frame: &mut Frame, app: &App, area: Rect) {
 // ── Opponent Cards ─────────────────────────────────────────
 
 fn render_opponent_cards(frame: &mut Frame, app: &App, area: Rect) {
-    let card_data: Vec<[Line<'static>; 5]> = if matches!(app.game_state.phase, GamePhase::Showdown)
-    {
+    let card_data: Vec<[Line<'static>; 5]> = if app.showdown_revealed {
         app.game_state
             .bot_cards
             .iter()
@@ -319,10 +340,7 @@ fn render_bet_chips(frame: &mut Frame, bet: u32, area: Rect) {
     }
 
     let amount = format_bb(bet);
-    let amount_style = Style::default()
-        .fg(GOLD_BRIGHT)
-        .bg(FELT_GREEN)
-        .add_modifier(Modifier::BOLD);
+    let amount_style = Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN);
     let chip_symbol = if area.width < 8 { "●" } else { "◉" };
     let mut line_spans = vec![Span::styled(
         chip_symbol,
@@ -362,28 +380,38 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
         ])
         .split(inner);
 
-    // Bet chips (only during active betting phases)
-    let show_bets = matches!(
-        app.game_state.phase,
-        GamePhase::Preflop | GamePhase::Flop | GamePhase::Turn | GamePhase::River
-    );
-    if show_bets {
-        render_bet_chips(frame, app.game_state.bot_bet, inner_chunks[0]);
-    }
+    // Bet chips (use visible snapshots so they persist until card reveal)
+    render_bet_chips(frame, app.visible_bot_bet, inner_chunks[0]);
 
-    // Pot + To Call info line
+    // Pot + To Call info line — padded to card-row width so centering stays stable
     let pot_style = Style::default()
         .fg(GOLD_BRIGHT)
         .add_modifier(Modifier::BOLD);
 
+    // During showdown, pot is zeroed (distributed to stacks), so use showdown_result
+    let display_pot = if let Some(ref result) = app.game_state.showdown_result {
+        result.pot_won
+    } else {
+        app.game_state.pot
+    };
+    let pot_text = format!("POT: {}", format_bb(display_pot));
+    let to_call = app.game_state.amount_to_call(Player::Human);
+    let call_text = if to_call > 0 {
+        format!("To call: {}", format_bb(to_call))
+    } else {
+        String::new()
+    };
+
+    // 39 = 5 cards × 7 chars + 4 separators (matches card row width)
+    let content_len = pot_text.len() + call_text.len();
+    let padding = if content_len < 39 { 39 - content_len } else { 2 };
+
     let mut info_spans: Vec<Span<'static>> = vec![
         Span::styled("POT: ", pot_style),
-        Span::styled(format_bb(app.game_state.pot), pot_style),
+        Span::styled(format_bb(display_pot), pot_style),
+        Span::raw(" ".repeat(padding)),
     ];
-
-    let to_call = app.game_state.amount_to_call(Player::Human);
     if to_call > 0 {
-        info_spans.push(Span::raw("          "));
         info_spans.push(Span::styled("To call: ", Style::default().fg(LABEL)));
         info_spans.push(Span::styled(
             format_bb(to_call),
@@ -396,11 +424,12 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let info_line = Paragraph::new(Line::from(info_spans)).alignment(Alignment::Center);
     frame.render_widget(info_line, inner_chunks[2]);
 
-    // Community cards
+    // Community cards (use visible count so card reveal can be delayed)
     let board = &app.game_state.board;
+    let visible = app.visible_board_len;
     let card_data: Vec<[Line<'static>; 5]> = (0..5)
         .map(|i| {
-            if i < board.len() {
+            if i < visible {
                 render_card_lines(&board[i])
             } else {
                 render_empty_slot_lines()
@@ -412,37 +441,65 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
     let paragraph = Paragraph::new(card_lines).alignment(Alignment::Center);
     frame.render_widget(paragraph, inner_chunks[3]);
 
-    if show_bets {
-        render_bet_chips(frame, app.game_state.player_bet, inner_chunks[5]);
-    }
+    render_bet_chips(frame, app.visible_player_bet, inner_chunks[5]);
 }
 
 // ── Player Info ────────────────────────────────────────────
 
+fn action_label(action: &Action) -> &'static str {
+    match action {
+        Action::Fold => "FOLD",
+        Action::Check => "CHECK",
+        Action::Call(_) => "CALL",
+        Action::Bet(_) => "BET",
+        Action::Raise(_) => "RAISE",
+        Action::AllIn(_) => "ALL-IN",
+    }
+}
+
+fn showdown_indicator_line(winner: Option<Player>, this_player: Player, description: &str) -> Line<'static> {
+    let mut spans = Vec::new();
+    match winner {
+        Some(w) if w == this_player => {
+            spans.push(Span::styled(
+                "[WIN] ",
+                Style::default().fg(GOLD_BRIGHT).add_modifier(Modifier::BOLD),
+            ));
+        }
+        None => {
+            spans.push(Span::styled(
+                "[TIE] ",
+                Style::default().fg(GOLD_BRIGHT).add_modifier(Modifier::BOLD),
+            ));
+        }
+        _ => {
+            spans.push(Span::styled(
+                "[LOSE] ",
+                Style::default().fg(Color::Rgb(140, 140, 140)).add_modifier(Modifier::BOLD),
+            ));
+        }
+    }
+    spans.push(Span::styled(
+        description.to_string(),
+        Style::default().fg(Color::Rgb(255, 255, 255)),
+    ));
+    Line::from(spans)
+}
+
 fn render_player_label(frame: &mut Frame, app: &App, area: Rect) {
-    let mut spans: Vec<Span<'static>> = vec![Span::styled(
-        "YOU ",
-        Style::default().fg(LABEL).add_modifier(Modifier::BOLD),
-    )];
-
-    if app.game_state.is_player_turn() {
-        spans.push(Span::styled(
-            "★ YOUR TURN ★",
-            Style::default()
-                .fg(GOLD_BRIGHT)
-                .add_modifier(Modifier::BOLD),
-        ));
+    if app.showdown_result_shown {
+        if let Some(ref result) = app.game_state.showdown_result {
+            let line = showdown_indicator_line(result.winner, Player::Human, &result.player_hand.description);
+            frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
+        }
+    } else if let Some(ref action) = app.player_last_action {
+        let paragraph = Paragraph::new(Line::from(Span::styled(
+            action_label(action),
+            Style::default().fg(Color::Rgb(255, 255, 255)),
+        )))
+        .alignment(Alignment::Center);
+        frame.render_widget(paragraph, area);
     }
-
-    if let Some((ratio, equity)) = app.game_state.pot_odds() {
-        spans.push(Span::styled(
-            format!("    odds {:.1}:1 need {:.0}%", ratio - 1.0, equity * 100.0),
-            Style::default().fg(DIM),
-        ));
-    }
-
-    let paragraph = Paragraph::new(Line::from(spans)).alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
 }
 
 fn render_player_stack(frame: &mut Frame, app: &App, area: Rect) {
@@ -484,41 +541,46 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
-    if is_player_turn && app.raise_mode {
+    if app.showdown_result_shown {
+        spans.push(Span::styled(
+            " N Next Hand ",
+            Style::default().fg(Color::Rgb(255, 255, 255)).bg(FELT_GREEN),
+        ));
+    } else if is_player_turn && app.raise_mode {
         // Raise mode replaces the action bar
         render_raise_bar(&mut spans, app, &available);
     } else if is_player_turn {
         if available.can_fold {
             spans.push(Span::styled(
                 " F Fold ",
-                Style::default().fg(Color::White).bg(ACTION_FOLD),
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_FOLD_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if available.can_check {
             spans.push(Span::styled(
-                " X Check ",
-                Style::default().fg(Color::White).bg(ACTION_CHECK),
+                " C Check ",
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CHECK_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if let Some(amount) = available.can_call {
             spans.push(Span::styled(
                 format!(" C Call {} ", format_bb(amount)),
-                Style::default().fg(Color::White).bg(ACTION_CALL),
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CALL_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if available.min_bet.is_some() || available.min_raise.is_some() {
             spans.push(Span::styled(
                 " R Raise ",
-                Style::default().fg(Color::White).bg(ACTION_RAISE),
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_RAISE_BG),
             ));
             spans.push(Span::raw("   "));
         }
         spans.push(Span::styled(
             " A All-in ",
-            Style::default().fg(Color::White).bg(ACTION_ALLIN),
+            Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_ALLIN_BG),
         ));
     }
 
@@ -655,7 +717,7 @@ fn render_help_overlay(frame: &mut Frame) {
 
     let section_style = Style::default().fg(GOLD).add_modifier(Modifier::BOLD);
     let key_style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
     let desc_style = Style::default().fg(Color::Rgb(180, 180, 180));
 
@@ -720,7 +782,7 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
     let section_style = Style::default().fg(GOLD).add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(Color::Rgb(180, 180, 180));
     let value_style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
 
     let win_rate = if stats.hands_played > 0 {
@@ -734,7 +796,7 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
     } else if profit < 0.0 {
         ACTION_FOLD
     } else {
-        Color::White
+        Color::Rgb(255, 255, 255)
     };
 
     let mut lines = vec![
@@ -779,91 +841,6 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
     frame.render_widget(paragraph, area);
 }
 
-fn render_showdown_overlay(frame: &mut Frame, app: &App) {
-    let area = centered_rect(55, 65, frame.area());
-    frame.render_widget(Clear, area);
-
-    let mut lines: Vec<Line<'static>> = Vec::new();
-
-    if let Some(ref result) = app.game_state.showdown_result {
-        // Result line
-        let (result_text, result_color) = match result.winner {
-            Some(Player::Human) => (
-                format!("You win {}!", format_bb(result.pot_won)),
-                ACTION_CHECK,
-            ),
-            Some(Player::Bot) => (
-                format!("Bot wins {}", format_bb(result.pot_won)),
-                ACTION_FOLD,
-            ),
-            None => (format!("Split pot — {}", format_bb(result.pot_won)), GOLD),
-        };
-        lines.push(Line::from(""));
-        lines.push(Line::from(Span::styled(
-            result_text,
-            Style::default()
-                .fg(result_color)
-                .add_modifier(Modifier::BOLD),
-        )));
-        lines.push(Line::from(""));
-
-        // Your hand
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Your hand: ",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                result.player_hand.description.clone(),
-                Style::default().fg(ACTION_CALL),
-            ),
-        ]));
-
-        let player_card_data: Vec<[Line<'static>; 5]> = app
-            .game_state
-            .player_cards
-            .iter()
-            .map(|c| render_card_lines(c))
-            .collect();
-        lines.extend(compose_card_row(&player_card_data, " "));
-        lines.push(Line::from(""));
-
-        // Bot hand
-        lines.push(Line::from(vec![
-            Span::styled(
-                "Bot's hand: ",
-                Style::default()
-                    .fg(Color::White)
-                    .add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(
-                result.bot_hand.description.clone(),
-                Style::default().fg(ACTION_CALL),
-            ),
-        ]));
-
-        let bot_card_data: Vec<[Line<'static>; 5]> = app
-            .game_state
-            .bot_cards
-            .iter()
-            .map(|c| render_card_lines(c))
-            .collect();
-        lines.extend(compose_card_row(&bot_card_data, " "));
-    }
-
-    lines.push(Line::from(""));
-    lines.push(Line::from(Span::styled(
-        "[Space/Enter] Continue",
-        Style::default().fg(DIM),
-    )));
-
-    let paragraph = Paragraph::new(lines)
-        .block(overlay_block("Showdown"))
-        .alignment(Alignment::Center);
-    frame.render_widget(paragraph, area);
-}
 
 fn render_session_end_overlay(frame: &mut Frame, app: &App) {
     let area = centered_rect(50, 50, frame.area());
@@ -883,7 +860,7 @@ fn render_session_end_overlay(frame: &mut Frame, app: &App) {
     let section_style = Style::default().fg(GOLD).add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(Color::Rgb(180, 180, 180));
     let value_style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
 
     let lines = vec![
@@ -923,12 +900,12 @@ fn render_session_end_overlay(frame: &mut Frame, app: &App) {
         Line::from(vec![
             Span::styled(
                 " N New Session ",
-                Style::default().fg(Color::White).bg(ACTION_CHECK),
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CHECK_BG),
             ),
             Span::raw("   "),
             Span::styled(
                 " Q Quit ",
-                Style::default().fg(Color::White).bg(ACTION_FOLD),
+                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_FOLD_BG),
             ),
         ]),
     ];
@@ -949,12 +926,12 @@ fn render_summary_overlay(frame: &mut Frame, app: &App) {
     } else if profit < 0.0 {
         ACTION_FOLD
     } else {
-        Color::White
+        Color::Rgb(255, 255, 255)
     };
 
     let label_style = Style::default().fg(Color::Rgb(180, 180, 180));
     let value_style = Style::default()
-        .fg(Color::White)
+        .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
 
     let lines = vec![

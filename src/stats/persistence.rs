@@ -116,4 +116,5 @@ impl StatsStore {
     pub fn record_session_end(&mut self) {
         self.stats.total_sessions += 1;
     }
+
 }

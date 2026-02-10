@@ -30,16 +30,7 @@ pub fn handle_key(
             }
         }
 
-        // Check
-        KeyCode::Char('x') | KeyCode::Char('X') => {
-            if available.can_check {
-                Some(Action::Check)
-            } else {
-                None
-            }
-        }
-
-        // Call
+        // Call / Check
         KeyCode::Char('c') | KeyCode::Char('C') => {
             if let Some(amount) = available.can_call {
                 Some(Action::Call(amount))
