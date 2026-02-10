@@ -3,17 +3,24 @@ use std::time::{Duration, Instant};
 
 use crate::bot::rule_based::RuleBasedBot;
 use crate::game::actions::Action;
-use crate::game::state::{GamePhase, GameState, Player};
+use crate::game::state::{GamePhase, GameState, Player, BIG_BLIND, SMALL_BLIND};
 use crate::stats::persistence::StatsStore;
 
-const DELAY_BOT_ACTION_MS: u64 = 700;
-const DELAY_STREET_PAUSE_MS: u64 = 500;
+const DELAY_BOT_ACTION_MS: u64 = 2500;
+const DELAY_BOT_ACTION_AFTER_REVEAL_MS: u64 = 5000;
+const DELAY_CARD_REVEAL_MS: u64 = 300;
+const DELAY_CARD_REVEAL_AFTER_BOT_MS: u64 = 2500;
 const DELAY_NEW_HAND_MS: u64 = 1200;
+const DELAY_SHOWDOWN_REVEAL_MS: u64 = 1000;
+const DELAY_SHOWDOWN_RESULT_MS: u64 = 1000;
+
 #[derive(Debug, Clone)]
 pub enum GameEvent {
     BotAction,
     StartNewHand,
-    RecordShowdownStats,
+    RevealCards,
+    RevealShowdown,
+    ShowResult,
 }
 
 #[derive(Debug, Clone)]
@@ -33,6 +40,13 @@ pub struct App {
     pub pending_events: VecDeque<GameEvent>,
     pub next_event_at: Option<Instant>,
     pub raise_mode: bool,
+    pub visible_board_len: usize,
+    pub visible_player_bet: u32,
+    pub visible_bot_bet: u32,
+    pub player_last_action: Option<Action>,
+    pub bot_last_action: Option<Action>,
+    pub showdown_revealed: bool,
+    pub showdown_result_shown: bool,
     starting_stack_bb: u32,
     last_phase: GamePhase,
     saw_flop_this_hand: bool,
@@ -55,6 +69,14 @@ impl App {
             pending_events: VecDeque::new(),
             next_event_at: None,
             raise_mode: false,
+            visible_board_len: 0,
+
+            visible_player_bet: 0,
+            visible_bot_bet: 0,
+            player_last_action: None,
+            bot_last_action: None,
+            showdown_revealed: false,
+            showdown_result_shown: false,
             starting_stack_bb,
             last_phase: initial_phase,
             saw_flop_this_hand: false,
@@ -77,7 +99,7 @@ impl App {
         }
     }
 
-    pub fn new_session(&mut self) {
+    pub fn new_session(&mut self, stats: &mut StatsStore) {
         self.game_state = GameState::new(self.starting_stack_bb);
         self.last_phase = self.game_state.phase;
         self.saw_flop_this_hand = false;
@@ -88,7 +110,13 @@ impl App {
         self.next_event_at = None;
         self.raise_mode = false;
         self.raise_input.clear();
+        self.visible_board_len = 0;
+        self.player_last_action = None;
+        self.bot_last_action = None;
+        self.showdown_revealed = false;
+        self.showdown_result_shown = false;
         self.message = Some("New session started!".to_string());
+        self.initialize(stats);
     }
 
     pub fn has_pending_events(&self) -> bool {
@@ -155,8 +183,12 @@ impl App {
 
         self.raise_mode = false;
         self.raise_input.clear();
+        self.player_last_action = Some(action);
 
-        // Capture phase before apply_action (which may advance the phase)
+        // Snapshot visible state before apply_action (which may advance phase and clear bets/pot)
+        self.visible_player_bet = self.projected_bet(Player::Human, action);
+        self.visible_bot_bet = self.game_state.bot_bet;
+
         let street = Self::phase_name(self.game_state.phase);
         let desc = action.description_for("You");
         self.game_state.apply_action(Player::Human, action);
@@ -194,7 +226,7 @@ impl App {
                         let winner_text = if player == Player::Bot {
                             "You win the pot"
                         } else {
-                            "Bot wins the pot"
+                            "Opp wins the pot"
                         };
                         self.log_action("", winner_text.to_string());
                     }
@@ -206,21 +238,29 @@ impl App {
             }
             GamePhase::Showdown => {
                 self.pending_events
-                    .push_back(GameEvent::RecordShowdownStats);
-                self.next_event_at = Some(Instant::now()); // immediate
+                    .push_back(GameEvent::RevealShowdown);
+                self.next_event_at =
+                    Some(Instant::now() + Duration::from_millis(DELAY_SHOWDOWN_REVEAL_MS));
             }
             GamePhase::SessionEnd | GamePhase::Summary => {
                 // Terminal states — nothing to enqueue
             }
             _ => {
-                if self.game_state.to_act == Player::Bot {
-                    let delay = if phase_changed {
-                        DELAY_STREET_PAUSE_MS + DELAY_BOT_ACTION_MS
-                    } else {
-                        DELAY_BOT_ACTION_MS
-                    };
+                if phase_changed && self.visible_board_len < self.game_state.board.len() {
+                    // Street transition: longer pause after bot's closing action
+                    let reveal_delay =
+                        if self.game_state.last_action.map(|(p, _)| p) == Some(Player::Bot) {
+                            DELAY_CARD_REVEAL_AFTER_BOT_MS
+                        } else {
+                            DELAY_CARD_REVEAL_MS
+                        };
+                    self.pending_events.push_back(GameEvent::RevealCards);
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(reveal_delay));
+                } else if self.game_state.to_act == Player::Bot {
                     self.pending_events.push_back(GameEvent::BotAction);
-                    self.next_event_at = Some(Instant::now() + Duration::from_millis(delay));
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_MS));
                 }
                 // else: player's turn, wait for input
             }
@@ -250,10 +290,16 @@ impl App {
             GameEvent::BotAction => {
                 let street = Self::phase_name(self.game_state.phase);
                 let bot_action = self.bot.decide(&self.game_state);
-                let desc = bot_action.description_for("Bot");
+                self.bot_last_action = Some(bot_action);
+
+                // Snapshot visible bets before apply_action (which may advance phase and clear bets)
+                self.visible_bot_bet = self.projected_bet(Player::Bot, bot_action);
+                self.visible_player_bet = self.game_state.player_bet;
+
+                let desc = bot_action.description_for("Opp");
                 self.game_state.apply_action(Player::Bot, bot_action);
-                self.log_action(street, format!("Bot {}", desc));
-                self.message = Some(format!("Bot {}", desc));
+                self.log_action(street, format!("Opp {}", desc));
+                self.message = Some(format!("Opp {}", desc));
             }
             GameEvent::StartNewHand => {
                 self.saw_flop_this_hand = false;
@@ -261,15 +307,41 @@ impl App {
                 self.recorded_vpip_this_hand = false;
                 self.raise_mode = false;
                 self.raise_input.clear();
+                self.player_last_action = None;
+                self.bot_last_action = None;
+                self.showdown_revealed = false;
+                self.showdown_result_shown = false;
                 self.game_state.start_new_hand();
+                self.visible_board_len = 0;
+                self.visible_player_bet = self.game_state.player_bet;
+                self.visible_bot_bet = self.game_state.bot_bet;
                 self.last_phase = self.game_state.phase;
                 // Add a separator for the new hand in the historical log
                 self.action_log.push(ActionLogEntry {
                     street: String::new(),
                     text: format!("── Hand #{} ──", self.game_state.hand_number),
                 });
+                self.log_blinds();
             }
-            GameEvent::RecordShowdownStats => {
+            GameEvent::RevealCards => {
+                self.visible_board_len = self.game_state.board.len();
+                self.visible_player_bet = 0;
+                self.visible_bot_bet = 0;
+                self.player_last_action = None;
+                self.bot_last_action = None;
+                // After revealing, check if bot should act next
+                if self.game_state.to_act == Player::Bot {
+                    self.pending_events.push_back(GameEvent::BotAction);
+                    self.next_event_at =
+                        Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS));
+                    return;
+                }
+            }
+            GameEvent::RevealShowdown => {
+                self.showdown_revealed = true;
+                self.player_last_action = None;
+                self.bot_last_action = None;
+                // Record stats
                 if let Some(ref result) = self.game_state.showdown_result {
                     let won = result.winner == Some(Player::Human);
                     stats.record_showdown(won);
@@ -279,8 +351,15 @@ impl App {
                         stats.record_pot_lost(result.pot_won);
                     }
                 }
+                self.pending_events.push_back(GameEvent::ShowResult);
+                self.next_event_at =
+                    Some(Instant::now() + Duration::from_millis(DELAY_SHOWDOWN_RESULT_MS));
+                return;
+            }
+            GameEvent::ShowResult => {
+                self.showdown_result_shown = true;
                 self.next_event_at = None;
-                return; // Don't enqueue follow-ups; showdown waits for user keypress
+                return;
             }
         }
 
@@ -289,20 +368,61 @@ impl App {
         self.enqueue_next_events(stats);
     }
 
+    fn log_blinds(&mut self) {
+        let sb_bb = SMALL_BLIND as f64 / BIG_BLIND as f64;
+        let (sb_player, bb_player) = if self.game_state.button == Player::Human {
+            ("You", "Opp")
+        } else {
+            ("Opp", "You")
+        };
+        self.log_action(
+            "Pre-Flop",
+            format!("{} post SB ({:.1}BB)", sb_player, sb_bb),
+        );
+        self.log_action("Pre-Flop", format!("{} post BB (1BB)", bb_player));
+    }
+
     pub fn initialize(&mut self, stats: &mut StatsStore) {
+        self.visible_player_bet = self.game_state.player_bet;
+        self.visible_bot_bet = self.game_state.bot_bet;
+        self.log_blinds();
         self.enqueue_next_events(stats);
     }
 
+    /// Compute what a player's bet will be after an action, before apply_action clears it.
+    fn projected_bet(&self, player: Player, action: Action) -> u32 {
+        let current = match player {
+            Player::Human => self.game_state.player_bet,
+            Player::Bot => self.game_state.bot_bet,
+        };
+        let stack = match player {
+            Player::Human => self.game_state.player_stack,
+            Player::Bot => self.game_state.bot_stack,
+        };
+        match action {
+            Action::Fold | Action::Check => current,
+            Action::Call(amount) => current + amount.min(stack),
+            Action::Bet(amount) | Action::Raise(amount) => {
+                let to_add = amount - current;
+                current + to_add.min(stack)
+            }
+            Action::AllIn(amount) => {
+                let to_add = amount - current;
+                current + to_add.min(stack)
+            }
+        }
+    }
+
     pub fn continue_after_showdown(&mut self, _stats: &mut StatsStore) {
-        if self.game_state.phase == GamePhase::Showdown {
+        if self.game_state.phase == GamePhase::Showdown && self.showdown_result_shown {
+            self.pending_events.clear();
             if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
                 self.pending_events.push_back(GameEvent::StartNewHand);
                 self.next_event_at = Some(Instant::now()); // immediate — user pressed key
             } else {
                 self.game_state.phase = GamePhase::SessionEnd;
+                self.next_event_at = None;
             }
-            // Ensure follow-up events get scheduled after the new hand starts
-            // (handled by process_next_event -> enqueue_next_events chain)
         }
     }
 }

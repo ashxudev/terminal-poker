@@ -115,18 +115,16 @@ fn run_game_loop(
                                 );
                                 app.game_state.phase = GamePhase::Summary;
                             }
-                            // Only Space/Enter to continue (matches "[Space] Continue" prompt)
-                            KeyCode::Char(' ') | KeyCode::Enter => {
+                            _ => {
                                 app.continue_after_showdown(stats_store);
                             }
-                            _ => {} // Ignore other keys during showdown
                         }
                     }
                     GamePhase::Summary | GamePhase::SessionEnd => match key.code {
                         KeyCode::Char('q') | KeyCode::Char('Q') => break,
                         KeyCode::Char('n') | KeyCode::Char('N') => {
                             if matches!(app.game_state.phase, GamePhase::SessionEnd) {
-                                app.new_session();
+                                app.new_session(stats_store);
                             }
                         }
                         _ => {
