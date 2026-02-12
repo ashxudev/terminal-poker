@@ -110,17 +110,17 @@ fn render_facedown_lines() -> [Line<'static>; 5] {
         Line::from(Span::styled("       ", bg_style)),
         Line::from(vec![
             Span::styled(" ", bg_style),
-            Span::styled("✦ ✦ ✦", back_style),
-            Span::styled(" ", bg_style),
-        ]),
-        Line::from(vec![
-            Span::styled(" ", bg_style),
             Span::styled(" ✦ ✦ ", back_style),
             Span::styled(" ", bg_style),
         ]),
         Line::from(vec![
             Span::styled(" ", bg_style),
-            Span::styled("✦ ✦ ✦", back_style),
+            Span::styled("  ✦  ", back_style),
+            Span::styled(" ", bg_style),
+        ]),
+        Line::from(vec![
+            Span::styled(" ", bg_style),
+            Span::styled(" ✦ ✦ ", back_style),
             Span::styled(" ", bg_style),
         ]),
         Line::from(Span::styled("       ", bg_style)),
