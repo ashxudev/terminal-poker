@@ -15,7 +15,7 @@ use ratatui::{
 const FELT_GREEN: Color = Color::Rgb(0, 80, 40);
 const CARD_BG: Color = Color::Rgb(200, 198, 193);
 const CARD_RED: Color = Color::Rgb(200, 40, 40);
-const CARD_BORDER: Color = Color::Rgb(130, 130, 130);
+const CARD_BLACK: Color = Color::Rgb(30, 30, 30);
 const LABEL: Color = Color::Rgb(200, 200, 200);
 const CARD_BACK: Color = Color::Rgb(60, 60, 120);
 const CARD_EMPTY: Color = Color::DarkGray;
@@ -58,15 +58,14 @@ fn overlay_block(title: &str) -> Block<'_> {
         .border_style(Style::default().fg(OVERLAY_BORDER))
 }
 
-// ── Card Rendering (7-wide × 5-tall) ──────────────────────
+// ── Card Rendering (7-wide × 5-tall, half-block glyph borders) ──
 
 fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
     let suit_color = if card.suit.is_red() {
         CARD_RED
     } else {
-        Color::Rgb(30, 30, 30)
+        CARD_BLACK
     };
-    let border_style = Style::default().fg(CARD_BORDER).bg(CARD_BG);
     let face_style = Style::default()
         .fg(suit_color)
         .bg(CARD_BG)
@@ -75,54 +74,56 @@ fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
 
     let rank = card.rank.symbol();
     let suit = card.suit.symbol();
+    let wide = rank.len() > 1; // "10" is 2 display chars
 
+    // Diagonal pip: rank+suit top-left, suit center, suit+rank bottom-right
+    // Each content row uses exactly 3 spans (bg, face, bg) to minimize
+    // span boundaries that can cause terminal rendering artifacts.
     [
-        Line::from(Span::styled("┌─────┐", border_style)),
+        Line::from(Span::styled("       ", bg_style)),
         Line::from(vec![
-            Span::styled("│", border_style),
-            Span::styled(if rank.len() > 1 { " " } else { "  " }, bg_style),
-            Span::styled(rank.to_string(), face_style),
-            Span::styled("  ", bg_style),
-            Span::styled("│", border_style),
-        ]),
-        Line::from(vec![
-            Span::styled("│", border_style),
-            Span::styled("     ", bg_style),
-            Span::styled("│", border_style),
-        ]),
-        Line::from(vec![
-            Span::styled("│", border_style),
             Span::styled(" ", bg_style),
-            Span::styled(format!("{}{}{}", suit, suit, suit), face_style),
-            Span::styled(" ", bg_style),
-            Span::styled("│", border_style),
+            Span::styled(format!("{}{}", rank, suit), face_style),
+            Span::styled(if wide { "   " } else { "    " }, bg_style),
         ]),
-        Line::from(Span::styled("└─────┘", border_style)),
+        Line::from(vec![
+            Span::styled("   ", bg_style),
+            Span::styled(suit.to_string(), face_style),
+            Span::styled("   ", bg_style),
+        ]),
+        Line::from(vec![
+            Span::styled(if wide { "   " } else { "    " }, bg_style),
+            Span::styled(format!("{}{}", suit, rank), face_style),
+            Span::styled(" ", bg_style),
+        ]),
+        Line::from(Span::styled("       ", bg_style)),
     ]
 }
 
 fn render_facedown_lines() -> [Line<'static>; 5] {
-    let border_style = Style::default().fg(CARD_BORDER);
-    let back_style = Style::default().fg(CARD_BACK).add_modifier(Modifier::DIM);
+    let bg_style = Style::default().bg(CARD_BACK);
+    let back_style = Style::default()
+        .fg(Color::Rgb(100, 100, 170))
+        .bg(CARD_BACK);
 
     [
-        Line::from(Span::styled("┌─────┐", border_style)),
+        Line::from(Span::styled("       ", bg_style)),
         Line::from(vec![
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
             Span::styled("░░░░░", back_style),
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
         ]),
         Line::from(vec![
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
             Span::styled("░░░░░", back_style),
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
         ]),
         Line::from(vec![
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
             Span::styled("░░░░░", back_style),
-            Span::styled("│", border_style),
+            Span::styled(" ", bg_style),
         ]),
-        Line::from(Span::styled("└─────┘", border_style)),
+        Line::from(Span::styled("       ", bg_style)),
     ]
 }
 
