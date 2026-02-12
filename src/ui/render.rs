@@ -13,7 +13,7 @@ use ratatui::{
 
 // ── Color Palette ──────────────────────────────────────────
 const FELT_GREEN: Color = Color::Rgb(0, 80, 40);
-const CARD_BG: Color = Color::Rgb(200, 198, 193);
+const CARD_BG: Color = Color::Rgb(214, 213, 209);
 const CARD_RED: Color = Color::Rgb(200, 40, 40);
 const CARD_BLACK: Color = Color::Rgb(30, 30, 30);
 const LABEL: Color = Color::Rgb(200, 200, 200);
