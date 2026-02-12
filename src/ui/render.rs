@@ -83,8 +83,8 @@ fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
         Line::from(Span::styled("       ", bg_style)),
         Line::from(vec![
             Span::styled(" ", bg_style),
-            Span::styled(format!("{}{}", rank, suit), face_style),
-            Span::styled(if wide { "   " } else { "    " }, bg_style),
+            Span::styled(rank.to_string(), face_style),
+            Span::styled(if wide { "    " } else { "     " }, bg_style),
         ]),
         Line::from(vec![
             Span::styled("   ", bg_style),
@@ -92,8 +92,8 @@ fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
             Span::styled("   ", bg_style),
         ]),
         Line::from(vec![
-            Span::styled(if wide { "   " } else { "    " }, bg_style),
-            Span::styled(format!("{}{}", suit, rank), face_style),
+            Span::styled(if wide { "    " } else { "     " }, bg_style),
+            Span::styled(rank.to_string(), face_style),
             Span::styled(" ", bg_style),
         ]),
         Line::from(Span::styled("       ", bg_style)),
