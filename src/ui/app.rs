@@ -7,8 +7,8 @@ use crate::game::state::{GamePhase, GameState, Player, BIG_BLIND, SMALL_BLIND};
 use crate::stats::persistence::StatsStore;
 
 const DELAY_BOT_ACTION_MS: u64 = 2500;
-const DELAY_BOT_ACTION_AFTER_REVEAL_MS: u64 = 5000;
-const DELAY_CARD_REVEAL_MS: u64 = 300;
+const DELAY_BOT_ACTION_AFTER_REVEAL_MS: u64 = 3500;
+const DELAY_CARD_REVEAL_MS: u64 = 500;
 const DELAY_CARD_REVEAL_AFTER_BOT_MS: u64 = 2500;
 const DELAY_NEW_HAND_MS: u64 = 1200;
 const DELAY_SHOWDOWN_REVEAL_MS: u64 = 1000;
@@ -45,6 +45,9 @@ pub struct App {
     pub visible_bot_bet: u32,
     pub player_last_action: Option<Action>,
     pub bot_last_action: Option<Action>,
+    pub bot_thinking: bool,
+    pub tick_count: u64,
+    pub thinking_start_tick: u64,
     pub showdown_revealed: bool,
     pub showdown_result_shown: bool,
     starting_stack_bb: u32,
@@ -75,6 +78,9 @@ impl App {
             visible_bot_bet: 0,
             player_last_action: None,
             bot_last_action: None,
+            bot_thinking: false,
+            tick_count: 0,
+            thinking_start_tick: 0,
             showdown_revealed: false,
             showdown_result_shown: false,
             starting_stack_bb,
@@ -113,6 +119,7 @@ impl App {
         self.visible_board_len = 0;
         self.player_last_action = None;
         self.bot_last_action = None;
+        self.bot_thinking = false;
         self.showdown_revealed = false;
         self.showdown_result_shown = false;
         self.message = Some("New session started!".to_string());
@@ -261,6 +268,9 @@ impl App {
                     self.pending_events.push_back(GameEvent::BotAction);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_MS));
+                    self.bot_thinking = true;
+                    self.thinking_start_tick = self.tick_count;
+                    self.bot_last_action = None;
                 }
                 // else: player's turn, wait for input
             }
@@ -288,6 +298,7 @@ impl App {
 
         match event {
             GameEvent::BotAction => {
+                self.bot_thinking = false;
                 let street = Self::phase_name(self.game_state.phase);
                 let bot_action = self.bot.decide(&self.game_state);
                 self.bot_last_action = Some(bot_action);
@@ -334,6 +345,8 @@ impl App {
                     self.pending_events.push_back(GameEvent::BotAction);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS));
+                    self.bot_thinking = true;
+                    self.thinking_start_tick = self.tick_count;
                     return;
                 }
             }

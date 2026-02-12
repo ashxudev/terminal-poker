@@ -222,6 +222,24 @@ pub fn render(frame: &mut Frame, app: &App) {
             let line = showdown_indicator_line(result.winner, Player::Bot, &result.bot_hand.description);
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), chunks[7]);
         }
+    } else if app.bot_thinking {
+        let elapsed = app.tick_count.wrapping_sub(app.thinking_start_tick);
+        let frame_index = (elapsed / 14) % 3;
+        let dot_positions: [usize; 3] = [0, 1, 2];
+        let active = dot_positions[frame_index as usize];
+        let spans: Vec<Span> = (0..3)
+            .map(|i| {
+                if i == active {
+                    Span::styled("●", Style::default().fg(Color::Rgb(255, 255, 255)))
+                } else {
+                    Span::styled("○", Style::default().fg(Color::Rgb(80, 80, 80)))
+                }
+            })
+            .collect();
+        frame.render_widget(
+            Paragraph::new(Line::from(spans)).alignment(Alignment::Center),
+            chunks[7],
+        );
     } else if let Some(ref action) = app.bot_last_action {
         let paragraph = Paragraph::new(Line::from(Span::styled(
             action_label(action),

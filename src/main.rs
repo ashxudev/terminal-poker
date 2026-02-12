@@ -96,6 +96,8 @@ fn run_game_loop(
     running: &Arc<AtomicBool>,
 ) -> io::Result<()> {
     while running.load(Ordering::SeqCst) {
+        app.tick_count = app.tick_count.wrapping_add(1);
+
         // Draw UI
         terminal.draw(|f| ui::render::render(f, app))?;
 
