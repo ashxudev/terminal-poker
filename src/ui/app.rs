@@ -13,11 +13,15 @@ const DELAY_CARD_REVEAL_AFTER_BOT_MS: u64 = 2500;
 const DELAY_NEW_HAND_MS: u64 = 1200;
 const DELAY_SHOWDOWN_REVEAL_MS: u64 = 1000;
 const DELAY_SHOWDOWN_RESULT_MS: u64 = 1000;
+const DELAY_POST_SB_MS: u64 = 400;
+const DELAY_POST_BB_MS: u64 = 800;
 
 #[derive(Debug, Clone)]
 pub enum GameEvent {
     BotAction,
     StartNewHand,
+    PostSmallBlind,
+    PostBigBlind,
     RevealCards,
     RevealShowdown,
     ShowResult,
@@ -324,8 +328,8 @@ impl App {
                 self.showdown_result_shown = false;
                 self.game_state.start_new_hand();
                 self.visible_board_len = 0;
-                self.visible_player_bet = self.game_state.player_bet;
-                self.visible_bot_bet = self.game_state.bot_bet;
+                self.visible_player_bet = 0;
+                self.visible_bot_bet = 0;
                 self.last_phase = self.game_state.phase;
                 // Add a separator for the new hand in the historical log
                 self.action_log.push(ActionLogEntry {
@@ -333,6 +337,26 @@ impl App {
                     text: format!("── Hand #{} ──", self.game_state.hand_number),
                 });
                 self.log_blinds();
+                self.pending_events.push_back(GameEvent::PostSmallBlind);
+                self.next_event_at =
+                    Some(Instant::now() + Duration::from_millis(DELAY_POST_SB_MS));
+                return;
+            }
+            GameEvent::PostSmallBlind => {
+                match self.game_state.button {
+                    Player::Human => self.visible_player_bet = self.game_state.player_bet,
+                    Player::Bot => self.visible_bot_bet = self.game_state.bot_bet,
+                }
+                self.pending_events.push_back(GameEvent::PostBigBlind);
+                self.next_event_at =
+                    Some(Instant::now() + Duration::from_millis(DELAY_POST_BB_MS));
+                return;
+            }
+            GameEvent::PostBigBlind => {
+                match self.game_state.button {
+                    Player::Human => self.visible_bot_bet = self.game_state.bot_bet,
+                    Player::Bot => self.visible_player_bet = self.game_state.player_bet,
+                }
             }
             GameEvent::RevealCards => {
                 self.visible_board_len = self.game_state.board.len();
@@ -395,11 +419,12 @@ impl App {
         self.log_action("Pre-Flop", format!("{} post BB (1BB)", bb_player));
     }
 
-    pub fn initialize(&mut self, stats: &mut StatsStore) {
-        self.visible_player_bet = self.game_state.player_bet;
-        self.visible_bot_bet = self.game_state.bot_bet;
+    pub fn initialize(&mut self, _stats: &mut StatsStore) {
+        self.visible_player_bet = 0;
+        self.visible_bot_bet = 0;
         self.log_blinds();
-        self.enqueue_next_events(stats);
+        self.pending_events.push_back(GameEvent::PostSmallBlind);
+        self.next_event_at = Some(Instant::now() + Duration::from_millis(DELAY_POST_SB_MS));
     }
 
     /// Compute what a player's bet will be after an action, before apply_action clears it.
