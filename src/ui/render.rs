@@ -360,9 +360,9 @@ fn render_bet_chips(frame: &mut Frame, bet: u32, area: Rect) {
 
     let amount = format_bb(bet);
     let amount_style = Style::default().fg(GOLD_BRIGHT).bg(FELT_GREEN);
-    let chip_symbol = if area.width < 8 { "●" } else { "◉" };
+    // TODO: allow players to customize the chip symbol
     let mut line_spans = vec![Span::styled(
-        chip_symbol,
+        "⦿",
         Style::default().fg(CHIP_FLAT).add_modifier(Modifier::BOLD),
     )];
     line_spans.push(Span::raw(" "));
