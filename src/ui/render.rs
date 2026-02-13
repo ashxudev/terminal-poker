@@ -229,7 +229,7 @@ pub fn render(frame: &mut Frame, app: &App) {
         frame.render_widget(
             Paragraph::new(Line::from(Span::styled(
                 flower_frames[flower_idx],
-                Style::default().fg(Color::Rgb(255, 255, 255)),
+                Style::default().fg(Color::Rgb(150, 160, 230)),
             )))
             .alignment(Alignment::Center),
             chunks[7],
