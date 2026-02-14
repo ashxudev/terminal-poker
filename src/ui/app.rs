@@ -15,6 +15,7 @@ const DELAY_SHOWDOWN_REVEAL_MS: u64 = 1000;
 const DELAY_SHOWDOWN_RESULT_MS: u64 = 1000;
 const DELAY_POST_SB_MS: u64 = 500;
 const DELAY_POST_BB_MS: u64 = 800;
+const DELAY_ALLIN_RUNOUT_MS: u64 = 1200;
 
 #[derive(Debug, Clone)]
 pub enum GameEvent {
@@ -231,21 +232,21 @@ impl App {
 
         match self.game_state.phase {
             GamePhase::HandComplete => {
+                // Log the fold result
+                if let Some((player, _)) = self.game_state.last_action {
+                    let winner_text = if player == Player::Bot {
+                        "You win the pot"
+                    } else {
+                        "Opp wins the pot"
+                    };
+                    self.log_action("", winner_text.to_string());
+                }
                 if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
-                    // Log the fold result
-                    if let Some((player, _)) = self.game_state.last_action {
-                        let winner_text = if player == Player::Bot {
-                            "You win the pot"
-                        } else {
-                            "Opp wins the pot"
-                        };
-                        self.log_action("", winner_text.to_string());
-                    }
                     self.pending_events.push_back(GameEvent::StartNewHand);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(DELAY_NEW_HAND_MS));
                 }
-                // else: session over, main loop detects busted stacks
+                // else: session over, main loop detects busted stacks on HandComplete
             }
             GamePhase::Showdown => {
                 self.pending_events
@@ -258,9 +259,14 @@ impl App {
             }
             _ => {
                 if phase_changed && self.visible_board_len < self.game_state.board.len() {
-                    // Street transition: longer pause after bot's closing action
+                    // Street transition delay
                     let reveal_delay =
-                        if self.game_state.last_action.map(|(p, _)| p) == Some(Player::Bot) {
+                        if self.game_state.player_stack == 0 || self.game_state.bot_stack == 0 {
+                            // All-in runout: consistent pacing between streets
+                            DELAY_ALLIN_RUNOUT_MS
+                        } else if self.game_state.last_action.map(|(p, _)| p) == Some(Player::Bot)
+                        {
+                            // Normal: longer pause after bot's closing action
                             DELAY_CARD_REVEAL_AFTER_BOT_MS
                         } else {
                             DELAY_CARD_REVEAL_MS
@@ -364,14 +370,22 @@ impl App {
                 self.visible_bot_bet = 0;
                 self.player_last_action = None;
                 self.bot_last_action = None;
-                // After revealing, check if bot should act next
-                if self.game_state.to_act == Player::Bot {
-                    self.pending_events.push_back(GameEvent::BotAction);
-                    self.next_event_at =
-                        Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS));
-                    self.bot_thinking = true;
-                    self.thinking_start_tick = self.tick_count;
-                    return;
+
+                // All-in runout: skip betting and advance to next street
+                if self.game_state.player_stack == 0 || self.game_state.bot_stack == 0 {
+                    self.game_state.advance_phase();
+                    // Fall through to enqueue_next_events which queues
+                    // the next RevealCards or RevealShowdown
+                } else {
+                    // Normal: check if bot should act next
+                    if self.game_state.to_act == Player::Bot {
+                        self.pending_events.push_back(GameEvent::BotAction);
+                        self.next_event_at =
+                            Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS));
+                        self.bot_thinking = true;
+                        self.thinking_start_tick = self.tick_count;
+                        return;
+                    }
                 }
             }
             GameEvent::RevealShowdown => {

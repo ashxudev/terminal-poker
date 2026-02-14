@@ -175,10 +175,8 @@ fn run_game_loop(
             }
         }
 
-        // Check for session end (player busted)
-        if app.game_state.phase != GamePhase::SessionEnd
-            && app.game_state.phase != GamePhase::Summary
-        {
+        // Check for session end after a fold resolves (showdown path handled by continue_after_showdown)
+        if app.game_state.phase == GamePhase::HandComplete {
             if app.game_state.player_stack == 0 || app.game_state.bot_stack == 0 {
                 app.game_state.phase = GamePhase::SessionEnd;
             }
