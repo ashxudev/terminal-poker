@@ -1,10 +1,10 @@
 [package]
 name = "terminal-poker"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
-description = "A heads-up No-Limit Texas Hold'em training tool for the terminal"
+description = "Heads-up No-Limit Texas Hold'em poker for the terminal"
 license = "MIT"
-repository = "https://github.com/terminal-poker/terminal-poker"
+repository = "https://github.com/ashxudev/terminal-poker"
 keywords = ["poker", "terminal", "tui", "game", "training"]
 categories = ["games", "command-line-utilities"]
 default-run = "poker"
