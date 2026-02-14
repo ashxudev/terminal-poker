@@ -555,10 +555,21 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     if app.showdown_result_shown {
-        spans.push(Span::styled(
-            " N Next Hand ",
-            Style::default().fg(Color::Rgb(255, 255, 255)).bg(FELT_GREEN),
-        ));
+        if app.game_state.player_stack == 0 || app.game_state.bot_stack == 0 {
+            spans.push(Span::styled(
+                " Game Over! Press any key ",
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(Color::Rgb(170, 130, 10)),
+            ));
+        } else {
+            spans.push(Span::styled(
+                " N Next Hand ",
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(FELT_GREEN),
+            ));
+        }
     } else if is_player_turn && app.raise_mode {
         // Raise mode replaces the action bar
         render_raise_bar(&mut spans, app, &available);

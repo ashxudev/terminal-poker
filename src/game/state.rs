@@ -263,8 +263,30 @@ impl GameState {
     }
 
     fn is_betting_round_complete(&self) -> bool {
-        // All-in situations: round complete when bets are equal (opponent called/matched)
+        // Both players all-in: always complete
+        if self.player_stack == 0 && self.bot_stack == 0 {
+            return true;
+        }
+
+        // One player all-in
         if self.player_stack == 0 || self.bot_stack == 0 {
+            let allin_bet = if self.player_stack == 0 {
+                self.player_bet
+            } else {
+                self.bot_bet
+            };
+            let other_bet = if self.player_stack == 0 {
+                self.bot_bet
+            } else {
+                self.player_bet
+            };
+
+            // Short all-in (pushed for <= other's existing bet): complete immediately
+            if allin_bet <= other_bet {
+                return true;
+            }
+
+            // All-in for more: complete when other player matches
             return self.player_bet == self.bot_bet;
         }
 
@@ -295,7 +317,21 @@ impl GameState {
         true
     }
 
-    fn advance_phase(&mut self) {
+    pub fn advance_phase(&mut self) {
+        // Return excess chips for unequal all-in bets (heads-up: no side pots needed)
+        if self.player_bet != self.bot_bet {
+            let effective = self.player_bet.min(self.bot_bet);
+            if self.player_bet > effective {
+                let excess = self.player_bet - effective;
+                self.player_stack += excess;
+                self.pot -= excess;
+            } else {
+                let excess = self.bot_bet - effective;
+                self.bot_stack += excess;
+                self.pot -= excess;
+            }
+        }
+
         // Reset street bets and action counter
         self.player_bet = 0;
         self.bot_bet = 0;
