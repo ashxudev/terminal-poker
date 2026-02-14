@@ -4,8 +4,6 @@ mod stats;
 mod ui;
 
 use std::io;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use clap::Parser;
 use crossterm::{
@@ -36,16 +34,16 @@ struct Args {
 fn main() -> io::Result<()> {
     let args = Args::parse();
 
-    // Set up Ctrl+C handler for graceful exit
-    let running = Arc::new(AtomicBool::new(true));
-    let r = running.clone();
-    ctrlc_handler(r);
-
     // Set up panic hook to restore terminal state on panic
     let original_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture,
+            crossterm::cursor::Show
+        );
         original_hook(panic_info);
     }));
 
@@ -64,7 +62,7 @@ fn main() -> io::Result<()> {
     app.initialize(&mut stats_store);
 
     // Main game loop
-    let result = run_game_loop(&mut terminal, &mut app, &mut stats_store, &running);
+    let result = run_game_loop(&mut terminal, &mut app, &mut stats_store);
 
     // Restore terminal
     disable_raw_mode()?;
@@ -81,21 +79,12 @@ fn main() -> io::Result<()> {
     result
 }
 
-fn ctrlc_handler(running: Arc<AtomicBool>) {
-    if let Err(e) = ctrlc::set_handler(move || {
-        running.store(false, Ordering::SeqCst);
-    }) {
-        eprintln!("Warning: Could not set Ctrl+C handler: {}", e);
-    }
-}
-
 fn run_game_loop(
     terminal: &mut Terminal<CrosstermBackend<io::Stdout>>,
     app: &mut App,
     stats_store: &mut StatsStore,
-    running: &Arc<AtomicBool>,
 ) -> io::Result<()> {
-    while running.load(Ordering::SeqCst) {
+    loop {
         app.tick_count = app.tick_count.wrapping_add(1);
 
         // Draw UI
@@ -107,6 +96,21 @@ fn run_game_loop(
         // Handle input (50ms poll for responsive event processing)
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
+                // Ctrl+C quits from any phase
+                if key.modifiers.contains(KeyModifiers::CONTROL)
+                    && key.code == KeyCode::Char('c')
+                {
+                    // Record stats unless already recorded (Summary is entered
+                    // after 'q' which already calls these)
+                    if !matches!(app.game_state.phase, GamePhase::Summary) {
+                        stats_store.record_session_end();
+                        stats_store.record_profit(
+                            (app.game_state.session_profit_bb() * 2.0).round() as i64,
+                        );
+                    }
+                    break;
+                }
+
                 match app.game_state.phase {
                     GamePhase::Showdown => {
                         match key.code {
@@ -136,12 +140,6 @@ fn run_game_loop(
                         }
                     },
                     _ => {
-                        if key.modifiers.contains(KeyModifiers::CONTROL)
-                            && key.code == KeyCode::Char('c')
-                        {
-                            break;
-                        }
-
                         match key.code {
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
                                 stats_store.record_session_end();
