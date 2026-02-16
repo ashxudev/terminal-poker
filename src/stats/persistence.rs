@@ -113,6 +113,30 @@ impl StatsStore {
         }
     }
 
+    pub fn record_three_bet_opportunity(&mut self) {
+        self.stats.three_bet_opportunities += 1;
+    }
+
+    pub fn record_three_bet(&mut self) {
+        self.stats.three_bet_hands += 1;
+    }
+
+    pub fn record_cbet_opportunity(&mut self) {
+        self.stats.cbet_opportunities += 1;
+    }
+
+    pub fn record_cbet(&mut self) {
+        self.stats.cbet_hands += 1;
+    }
+
+    pub fn record_fold_to_cbet_opportunity(&mut self) {
+        self.stats.fold_to_cbet_opportunities += 1;
+    }
+
+    pub fn record_fold_to_cbet(&mut self) {
+        self.stats.fold_to_cbet_hands += 1;
+    }
+
     pub fn record_session_end(&mut self) {
         self.stats.total_sessions += 1;
     }
