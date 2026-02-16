@@ -68,6 +68,7 @@ pub struct GameState {
     pub to_act: Player,
     pub button: Player,
     pub last_aggressor: Option<Player>,
+    pub preflop_aggressor: Option<Player>,
     pub last_raise_size: u32,
     pub hand_number: u32,
     pub starting_stack: u32,
@@ -105,6 +106,7 @@ impl GameState {
             to_act: Player::Human,
             button: Player::Bot,
             last_aggressor: None,
+            preflop_aggressor: None,
             last_raise_size: BIG_BLIND,
             hand_number: 0,
             starting_stack,
@@ -133,6 +135,7 @@ impl GameState {
         self.player_bet = 0;
         self.bot_bet = 0;
         self.last_aggressor = None;
+        self.preflop_aggressor = None;
         self.last_raise_size = BIG_BLIND;
         self.last_action = None;
         self.showdown_result = None;
@@ -188,6 +191,9 @@ impl GameState {
                 self.add_chips(player, to_add);
                 self.last_aggressor = Some(player);
                 self.last_raise_size = amount - old_max;
+                if self.phase == GamePhase::Preflop {
+                    self.preflop_aggressor = Some(player);
+                }
             }
             Action::AllIn(amount) => {
                 let current_bet = self.current_bet(player);
@@ -197,6 +203,9 @@ impl GameState {
                 if amount > old_max {
                     self.last_aggressor = Some(player);
                     self.last_raise_size = amount - old_max;
+                    if self.phase == GamePhase::Preflop {
+                        self.preflop_aggressor = Some(player);
+                    }
                 }
             }
         }
@@ -233,7 +242,7 @@ impl GameState {
         }
     }
 
-    fn max_bet(&self) -> u32 {
+    pub fn max_bet(&self) -> u32 {
         self.player_bet.max(self.bot_bet)
     }
 

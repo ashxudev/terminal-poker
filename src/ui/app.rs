@@ -58,8 +58,11 @@ pub struct App {
     starting_stack_bb: u32,
     last_phase: GamePhase,
     saw_flop_this_hand: bool,
-    recorded_hand_this_round: bool,
     recorded_vpip_this_hand: bool,
+    three_bet_opportunity_recorded: bool,
+    player_raised_preflop: bool,
+    cbet_opportunity_recorded: bool,
+    facing_cbet: bool,
 }
 
 impl App {
@@ -91,8 +94,11 @@ impl App {
             starting_stack_bb,
             last_phase: initial_phase,
             saw_flop_this_hand: false,
-            recorded_hand_this_round: false,
             recorded_vpip_this_hand: false,
+            three_bet_opportunity_recorded: false,
+            player_raised_preflop: false,
+            cbet_opportunity_recorded: false,
+            facing_cbet: false,
         }
     }
 
@@ -114,8 +120,11 @@ impl App {
         self.game_state = GameState::new(self.starting_stack_bb);
         self.last_phase = self.game_state.phase;
         self.saw_flop_this_hand = false;
-        self.recorded_hand_this_round = false;
         self.recorded_vpip_this_hand = false;
+        self.three_bet_opportunity_recorded = false;
+        self.player_raised_preflop = false;
+        self.cbet_opportunity_recorded = false;
+        self.facing_cbet = false;
         self.action_log.clear();
         self.pending_events.clear();
         self.next_event_at = None;
@@ -161,24 +170,82 @@ impl App {
             return;
         }
 
-        // Record stats - only count hand once
-        if !self.recorded_hand_this_round {
-            stats.record_hand_start();
-            self.recorded_hand_this_round = true;
+        // Determine if this action is truly aggressive
+        // AllIn is only aggressive if it exceeds the current max bet (otherwise it's a call)
+        let is_aggressive_action = match action {
+            Action::Bet(_) | Action::Raise(_) => true,
+            Action::AllIn(amount) => amount > self.game_state.max_bet(),
+            _ => false,
+        };
+
+        // 3-bet tracking: preflop, facing bot's raise, player hasn't raised yet
+        // Must run BEFORE player_raised_preflop is set below
+        if !self.three_bet_opportunity_recorded
+            && self.game_state.board.is_empty()
+            && self.game_state.last_aggressor == Some(Player::Bot)
+            && self.game_state.amount_to_call(Player::Human) > 0
+            && !self.player_raised_preflop
+        {
+            self.three_bet_opportunity_recorded = true;
+            stats.record_three_bet_opportunity();
+            if is_aggressive_action {
+                stats.record_three_bet();
+            }
         }
 
+        // Track whether player has raised preflop (to distinguish 3-bet from 4-bet+)
+        if self.game_state.board.is_empty() && is_aggressive_action {
+            self.player_raised_preflop = true;
+        }
+
+        // C-bet tracking: flop, player was preflop aggressor, no bet yet this street
+        if !self.cbet_opportunity_recorded
+            && self.game_state.phase == GamePhase::Flop
+            && self.game_state.preflop_aggressor == Some(Player::Human)
+            && self.game_state.last_aggressor.is_none()
+        {
+            self.cbet_opportunity_recorded = true;
+            stats.record_cbet_opportunity();
+            if is_aggressive_action {
+                stats.record_cbet();
+            }
+        }
+
+        // Fold-to-cbet tracking: player faces a c-bet from the bot
+        if self.facing_cbet {
+            stats.record_fold_to_cbet_opportunity();
+            if matches!(action, Action::Fold) {
+                stats.record_fold_to_cbet();
+            }
+            self.facing_cbet = false;
+        }
+
+        // Record action type stats
         match action {
             Action::Call(_) => stats.record_call(),
             Action::Bet(_) => {
-                stats.record_bet();
+                if self.game_state.board.is_empty() {
+                    // Preflop: all bets are raises (blinds are forced bets)
+                    stats.record_raise();
+                    stats.record_pfr();
+                } else {
+                    stats.record_bet();
+                }
+            }
+            Action::Raise(_) => {
+                stats.record_raise();
                 if self.game_state.board.is_empty() {
                     stats.record_pfr();
                 }
             }
-            Action::Raise(_) | Action::AllIn(_) => {
-                stats.record_raise();
-                if self.game_state.board.is_empty() {
-                    stats.record_pfr();
+            Action::AllIn(_) => {
+                if is_aggressive_action {
+                    stats.record_raise();
+                    if self.game_state.board.is_empty() {
+                        stats.record_pfr();
+                    }
+                } else {
+                    stats.record_call();
                 }
             }
             _ => {}
@@ -313,6 +380,20 @@ impl App {
                 let bot_action = self.bot.decide(&self.game_state);
                 self.bot_last_action = Some(bot_action);
 
+                // Detect bot c-bet: flop, bot was preflop aggressor, no bet yet, aggressive action
+                let bot_is_aggressive = match bot_action {
+                    Action::Bet(_) | Action::Raise(_) => true,
+                    Action::AllIn(amount) => amount > self.game_state.max_bet(),
+                    _ => false,
+                };
+                if self.game_state.phase == GamePhase::Flop
+                    && self.game_state.preflop_aggressor == Some(Player::Bot)
+                    && self.game_state.last_aggressor.is_none()
+                    && bot_is_aggressive
+                {
+                    self.facing_cbet = true;
+                }
+
                 // Snapshot visible bets before apply_action (which may advance phase and clear bets)
                 self.visible_bot_bet = self.projected_bet(Player::Bot, bot_action);
                 self.visible_player_bet = self.game_state.player_bet;
@@ -324,8 +405,12 @@ impl App {
             }
             GameEvent::StartNewHand => {
                 self.saw_flop_this_hand = false;
-                self.recorded_hand_this_round = false;
                 self.recorded_vpip_this_hand = false;
+                self.three_bet_opportunity_recorded = false;
+                self.player_raised_preflop = false;
+                self.cbet_opportunity_recorded = false;
+                self.facing_cbet = false;
+                stats.record_hand_start();
                 self.raise_mode = false;
                 self.raise_input.clear();
                 self.player_last_action = None;
@@ -433,7 +518,8 @@ impl App {
         self.log_action("Pre-Flop", format!("{} post BB (1BB)", bb_player));
     }
 
-    pub fn initialize(&mut self, _stats: &mut StatsStore) {
+    pub fn initialize(&mut self, stats: &mut StatsStore) {
+        stats.record_hand_start();
         self.visible_player_bet = 0;
         self.visible_bot_bet = 0;
         self.log_blinds();
