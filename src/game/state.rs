@@ -452,6 +452,7 @@ impl GameState {
         AvailableActions::new(to_call, min_raise_to, stack, BIG_BLIND)
     }
 
+    #[allow(dead_code)]
     pub fn pot_odds(&self) -> Option<(f64, f64)> {
         let to_call = self.amount_to_call(Player::Human);
         if to_call == 0 {

@@ -1,4 +1,4 @@
-use crate::game::deck::{Card, Rank, Suit};
+use crate::game::deck::{Card, Rank};
 
 /// Preflop hand tier for heads-up play, ordered weakest to strongest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -140,6 +140,7 @@ pub fn preflop_strength(cards: &[Card]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::deck::Suit;
 
     fn card(rank: Rank, suit: Suit) -> Card {
         Card::new(rank, suit)
