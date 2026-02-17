@@ -14,13 +14,32 @@ Practice your poker strategy against a rule-based AI bot with configurable aggre
 
 ## Installation
 
-Requires [Rust](https://www.rust-lang.org/tools/install).
+### Cargo (requires [Rust](https://www.rust-lang.org/tools/install))
 
 ```bash
 cargo install terminal-poker
 ```
 
-Or build from source:
+### Quick install (macOS / Linux)
+
+```bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/ashxudev/terminal-poker/releases/latest/download/terminal-poker-installer.sh | sh
+```
+
+### Quick install (Windows PowerShell)
+
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/ashxudev/terminal-poker/releases/latest/download/terminal-poker-installer.ps1 | iex"
+```
+
+### Homebrew (macOS / Linux)
+
+```bash
+brew tap ashxudev/terminal-poker
+brew install terminal-poker
+```
+
+### Build from source
 
 ```bash
 git clone https://github.com/ashxudev/terminal-poker.git
@@ -28,7 +47,7 @@ cd terminal-poker
 cargo build --release
 ```
 
-Both `poker` and `terminal-poker` binaries are installed.
+All methods install both `poker` and `terminal-poker` binaries.
 
 ## Usage
 

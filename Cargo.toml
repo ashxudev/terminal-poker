@@ -7,6 +7,7 @@ license = "MIT"
 repository = "https://github.com/ashxudev/terminal-poker"
 keywords = ["poker", "terminal", "tui", "game", "training"]
 categories = ["games", "command-line-utilities"]
+homepage = "https://github.com/ashxudev/terminal-poker"
 default-run = "poker"
 
 # Both binaries use the same source - users can run `terminal-poker` or `poker`
@@ -30,3 +31,8 @@ dirs = "5.0"
 [profile.release]
 lto = true
 codegen-units = 1
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
