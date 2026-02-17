@@ -751,7 +751,7 @@ fn render_help_overlay(frame: &mut Frame) {
         Line::from(vec![
             Span::styled("  F ", key_style),
             Span::styled("Fold   ", desc_style),
-            Span::styled("X ", key_style),
+            Span::styled("C ", key_style),
             Span::styled("Check   ", desc_style),
             Span::styled("C ", key_style),
             Span::styled("Call", desc_style),

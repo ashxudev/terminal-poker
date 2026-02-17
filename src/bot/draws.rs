@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use crate::game::deck::{Card, Rank, Suit};
+use crate::game::deck::{Card, Suit};
 
 #[derive(Debug, Clone, Default)]
 pub struct DrawInfo {
@@ -150,6 +150,7 @@ fn detect_overcards(hole_cards: &[Card], board: &[Card], info: &mut DrawInfo) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::game::deck::Rank;
 
     fn card(rank: Rank, suit: Suit) -> Card {
         Card::new(rank, suit)
