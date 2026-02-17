@@ -691,7 +691,7 @@ dependencies = [
 
 [[package]]
 name = "terminal-poker"
-version = "1.0.1-rc.1"
+version = "1.0.1"
 dependencies = [
  "clap",
  "crossterm",
