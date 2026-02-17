@@ -1,6 +1,6 @@
 [package]
 name = "terminal-poker"
-version = "1.0.0"
+version = "1.0.1-rc.1"
 edition = "2021"
 description = "Heads-up No-Limit Texas Hold'em poker for the terminal"
 license = "MIT"
