@@ -2,7 +2,7 @@
 
 ![terminal-poker gameplay](assets/demo.gif)
 
-Heads-up No-Limit Texas Hold'em for the terminal, built with Rust and [ratatui](https://github.com/ratatui/ratatui).
+Heads-up No-Limit Texas Hold'em for the terminal, built with Rust and ratatui.
 
 Practice your poker strategy against a rule-based AI bot with configurable aggression, track your stats over time, and sharpen your game — all without leaving the terminal.
 
