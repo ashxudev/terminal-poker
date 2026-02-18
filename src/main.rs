@@ -23,12 +23,21 @@ use ui::app::App;
 #[command(version)]
 struct Args {
     /// Starting stack size in big blinds
-    #[arg(long, default_value = "100")]
+    #[arg(long, default_value = "100", value_parser = clap::value_parser!(u32).range(2..))]
     stack: u32,
 
     /// Bot aggression level (0.0 = passive, 1.0 = aggressive)
-    #[arg(long, default_value = "0.5")]
+    #[arg(long, default_value = "0.5", value_parser = parse_aggression, allow_negative_numbers = true)]
     aggression: f64,
+}
+
+fn parse_aggression(s: &str) -> Result<f64, String> {
+    let val: f64 = s.parse().map_err(|_| format!("'{s}' is not a valid number"))?;
+    if (0.0..=1.0).contains(&val) {
+        Ok(val)
+    } else {
+        Err(format!("{val} is not in range 0.0 to 1.0"))
+    }
 }
 
 fn main() -> io::Result<()> {
