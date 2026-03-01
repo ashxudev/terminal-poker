@@ -1,5 +1,7 @@
 # terminal-poker
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/ashxudev/terminal-poker)
+
 ![terminal-poker gameplay](assets/demo.gif)
 
 Heads-up No-Limit Texas Hold'em for the terminal, built with Rust and ratatui.
