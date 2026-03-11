@@ -1,0 +1,25 @@
+CHANGELOG.md
+  150b4299dad960a3 1-5
+src/game/deck.rs
+  150b4299dad960a3 17-20
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.10",
+  "base_commit_sha": "af16f9bc12ada4ab8cf86b527ab803e1f0a26776",
+  "prompts": {
+    "150b4299dad960a3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7150cdcd-1a1e-4428-87dc-745ead3e4b75",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "Ash Xu <ashxudev@gmail.com>",
+      "messages": [],
+      "total_additions": 10,
+      "total_deletions": 5,
+      "accepted_lines": 9,
+      "overriden_lines": 0
+    }
+  }
+}
