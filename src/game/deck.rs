@@ -14,10 +14,10 @@ pub enum Suit {
 impl Suit {
     pub fn symbol(&self) -> &'static str {
         match self {
-            Suit::Spades => "♠",
-            Suit::Hearts => "♥",
-            Suit::Diamonds => "♦",
-            Suit::Clubs => "♣",
+            Suit::Spades => "♠\u{FE0E}",
+            Suit::Hearts => "❤\u{FE0E}",
+            Suit::Diamonds => "♦\u{FE0E}",
+            Suit::Clubs => "♣\u{FE0E}",
         }
     }
 
