@@ -1,0 +1,88 @@
+name: User story
+description: A vertical slice of product or operational value
+title: "[E?.?] "
+labels:
+  - "type:story"
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Stories must be observable, testable, and small enough to complete as one coherent slice.
+  - type: input
+    id: epic
+    attributes:
+      label: Epic and story ID
+      placeholder: E2.3
+    validations:
+      required: true
+  - type: textarea
+    id: story
+    attributes:
+      label: Story
+      description: State the user, capability, and value.
+      placeholder: As a player, I want ... so that ...
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Acceptance criteria
+      placeholder: |
+        - Given ... when ... then ...
+        - Given ... when ... then ...
+    validations:
+      required: true
+  - type: textarea
+    id: exclusions
+    attributes:
+      label: Explicit exclusions
+      description: State what this story does not include.
+    validations:
+      required: true
+  - type: dropdown
+    id: points
+    attributes:
+      label: Story points
+      options:
+        - "1"
+        - "2"
+        - "3"
+        - "5"
+        - "8"
+        - "13 - split before commitment"
+    validations:
+      required: true
+  - type: textarea
+    id: rules
+    attributes:
+      label: Rules, authority, and privacy impact
+      description: Link poker policies or state why none apply.
+    validations:
+      required: true
+  - type: textarea
+    id: tests
+    attributes:
+      label: Test and evidence plan
+      description: Identify unit, property, integration, end-to-end, or operational evidence.
+    validations:
+      required: true
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies and decisions
+      placeholder: None, or link issues/ADRs/decisions.
+    validations:
+      required: true
+  - type: checkboxes
+    id: ready
+    attributes:
+      label: Definition of Ready
+      options:
+        - label: Value and acceptance criteria are clear.
+          required: true
+        - label: Rules and privacy implications are understood.
+          required: true
+        - label: Dependencies are named.
+          required: true
+        - label: Test approach is known.
+          required: true

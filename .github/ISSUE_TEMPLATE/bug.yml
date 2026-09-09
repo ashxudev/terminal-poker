@@ -1,0 +1,54 @@
+name: Defect
+description: Incorrect behaviour with reproducible evidence
+title: "[BUG] "
+labels:
+  - "type:bug"
+body:
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity
+      options:
+        - Critical - privacy, chips, authorization, duplication, or corruption
+        - High - wrong award, illegal action, deadlock, or failed recovery
+        - Medium - recoverable inconsistency or misleading UI
+        - Low - cosmetic or documentation
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Reproduction
+      placeholder: Numbered steps, command sequence, seed, hand ID, or test case.
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Authority, privacy, and data impact
+      description: State whether cards, chips, identity, revisions, or recovery are affected.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence
+      description: Logs with secrets removed, screenshots, failing test, or environment details.
+  - type: textarea
+    id: regression
+    attributes:
+      label: Proposed regression test
+    validations:
+      required: true

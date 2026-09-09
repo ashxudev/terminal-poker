@@ -1,0 +1,56 @@
+name: Decision
+description: Product, poker-rule, architecture, security, or operations decision
+title: "[DECISION] "
+labels:
+  - "type:decision"
+body:
+  - type: dropdown
+    id: domain
+    attributes:
+      label: Decision domain
+      options:
+        - Product scope
+        - Poker rules
+        - Architecture
+        - Protocol or compatibility
+        - Security or privacy
+        - Persistence or recovery
+        - Deployment or operations
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Context
+      description: Explain why a decision is needed now and what it blocks.
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options and trade-offs
+      placeholder: |
+        1. Option A - benefits, costs, and risks
+        2. Option B - benefits, costs, and risks
+    validations:
+      required: true
+  - type: textarea
+    id: recommendation
+    attributes:
+      label: Recommendation
+      description: State the recommended choice and why.
+    validations:
+      required: true
+  - type: textarea
+    id: consequences
+    attributes:
+      label: Consequences and affected stories
+    validations:
+      required: true
+  - type: input
+    id: deadline
+    attributes:
+      label: Needed by
+      placeholder: Sprint or story ID
+    validations:
+      required: true
