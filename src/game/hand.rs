@@ -17,6 +17,7 @@ pub enum HandRank {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HandEvaluation {
     pub rank: HandRank,
+    /// Category-defining ranks followed by every remaining kicker, strongest first.
     pub kickers: Vec<Rank>,
     pub description: String,
 }
@@ -42,17 +43,39 @@ pub fn evaluate_hand(hole_cards: &[Card], board: &[Card]) -> HandEvaluation {
         return evaluate_partial(&all_cards);
     }
 
-    // Generate all 5-card combinations and find the best
-    let combos = combinations(&all_cards, 5);
-    combos
-        .into_iter()
-        .map(|combo| evaluate_five(&combo))
-        .max_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.kickers.cmp(&b.kickers)))
+    evaluate_best_five(hole_cards, board)
+        .map(|(evaluation, _)| evaluation)
         .unwrap_or_else(|| HandEvaluation {
             rank: HandRank::HighCard,
             kickers: vec![],
             description: "Unknown".to_string(),
         })
+}
+
+/// Returns the evaluated hand and one deterministic five-card realization of
+/// it. This is suitable for showing which cards play after those cards are
+/// legitimately visible; callers must still enforce projection privacy.
+pub fn evaluate_best_five(
+    hole_cards: &[Card],
+    board: &[Card],
+) -> Option<(HandEvaluation, Vec<Card>)> {
+    let mut all_cards = hole_cards.to_vec();
+    all_cards.extend(board);
+    let mut best: Option<(HandEvaluation, Vec<Card>)> = None;
+    for cards in combinations(&all_cards, 5) {
+        let evaluation = evaluate_five(&cards);
+        let replaces = best.as_ref().is_none_or(|(current, _)| {
+            evaluation
+                .rank
+                .cmp(&current.rank)
+                .then_with(|| evaluation.kickers.cmp(&current.kickers))
+                .is_gt()
+        });
+        if replaces {
+            best = Some((evaluation, cards));
+        }
+    }
+    best
 }
 
 fn evaluate_partial(cards: &[Card]) -> HandEvaluation {
@@ -168,7 +191,9 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
     if let Some((&rank, _)) = rank_counts.iter().find(|(_, &c)| c == 4) {
         return HandEvaluation {
             rank: HandRank::FourOfAKind,
-            kickers: vec![rank],
+            kickers: std::iter::once(rank)
+                .chain(ranks.iter().copied().filter(|&other| other != rank))
+                .collect(),
             description: format!("Four of a kind, {}", rank_name(rank)),
         };
     }
@@ -177,14 +202,14 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
     let trips = rank_counts.iter().find(|(_, &c)| c == 3).map(|(&r, _)| r);
     let pair = rank_counts.iter().find(|(_, &c)| c == 2).map(|(&r, _)| r);
 
-    if trips.is_some() && pair.is_some() {
+    if let (Some(trips), Some(pair)) = (trips, pair) {
         return HandEvaluation {
             rank: HandRank::FullHouse,
-            kickers: vec![trips.unwrap(), pair.unwrap()],
+            kickers: vec![trips, pair],
             description: format!(
                 "Full house, {} full of {}",
-                rank_name(trips.unwrap()),
-                rank_name(pair.unwrap())
+                rank_name(trips),
+                rank_name(pair)
             ),
         };
     }
@@ -208,7 +233,9 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
     if let Some(trip_rank) = trips {
         return HandEvaluation {
             rank: HandRank::ThreeOfAKind,
-            kickers: vec![trip_rank],
+            kickers: std::iter::once(trip_rank)
+                .chain(ranks.iter().copied().filter(|&rank| rank != trip_rank))
+                .collect(),
             description: format!("Three of a kind, {}", rank_name(trip_rank)),
         };
     }
@@ -225,6 +252,12 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
         sorted_pairs.sort_by(|a, b| b.cmp(a));
         let high_pair = sorted_pairs[0];
         let low_pair = sorted_pairs[1];
+        sorted_pairs.extend(
+            ranks
+                .iter()
+                .copied()
+                .filter(|&rank| rank != high_pair && rank != low_pair),
+        );
         return HandEvaluation {
             rank: HandRank::TwoPair,
             kickers: sorted_pairs,
@@ -240,7 +273,9 @@ fn evaluate_five(cards: &[Card]) -> HandEvaluation {
     if pairs.len() == 1 {
         return HandEvaluation {
             rank: HandRank::Pair,
-            kickers: vec![pairs[0]],
+            kickers: std::iter::once(pairs[0])
+                .chain(ranks.iter().copied().filter(|&rank| rank != pairs[0]))
+                .collect(),
             description: format!("Pair of {}", rank_name(pairs[0])),
         };
     }
@@ -394,6 +429,122 @@ mod tests {
 
         // Six-high should beat wheel (Five < Six)
         assert!(six_eval.kickers > wheel_eval.kickers);
+    }
+
+    #[test]
+    fn best_five_identifies_the_cards_that_play() {
+        let hole = [
+            Card::new(Rank::Two, Suit::Clubs),
+            Card::new(Rank::Three, Suit::Diamonds),
+        ];
+        let board = [
+            Card::new(Rank::Ace, Suit::Spades),
+            Card::new(Rank::King, Suit::Hearts),
+            Card::new(Rank::Queen, Suit::Diamonds),
+            Card::new(Rank::Jack, Suit::Clubs),
+            Card::new(Rank::Ten, Suit::Spades),
+        ];
+
+        let (evaluation, cards) = evaluate_best_five(&hole, &board).unwrap();
+        assert_eq!(evaluation.rank, HandRank::Straight);
+        assert_eq!(cards, board);
+    }
+
+    #[test]
+    fn best_five_two_pair_uses_the_ace_from_the_played_hand() {
+        use Rank::*;
+        use Suit::*;
+        let hole = [Card::new(Jack, Spades), Card::new(Two, Hearts)];
+        let board = [
+            Card::new(Four, Spades),
+            Card::new(Two, Diamonds),
+            Card::new(Ace, Spades),
+            Card::new(Six, Diamonds),
+            Card::new(Jack, Hearts),
+        ];
+        let (evaluation, cards) = evaluate_best_five(&hole, &board).unwrap();
+        assert_eq!(evaluation.rank, HandRank::TwoPair);
+        assert_eq!(evaluation.kickers, [Jack, Two, Ace]);
+        assert_eq!(cards, [hole[0], hole[1], board[1], board[2], board[4]]);
+        // Selection strength must not depend on deal/enumeration order.
+        let mut reversed = board;
+        reversed.reverse();
+        let (other, other_cards) = evaluate_best_five(&hole, &reversed).unwrap();
+        assert_eq!(evaluation, other);
+        assert!(cards.iter().all(|card| other_cards.contains(card)));
+    }
+
+    #[test]
+    fn complete_kicker_vectors_break_every_duplicate_rank_tie() {
+        use Rank::*;
+        let cases = [
+            (
+                HandRank::Pair,
+                [Jack, Jack, Ace, King, Nine],
+                [Jack, Jack, Ace, King, Eight],
+                vec![Jack, Ace, King, Nine],
+            ),
+            (
+                HandRank::TwoPair,
+                [Jack, Jack, Two, Two, Ace],
+                [Jack, Jack, Two, Two, King],
+                vec![Jack, Two, Ace],
+            ),
+            (
+                HandRank::ThreeOfAKind,
+                [Jack, Jack, Jack, Ace, King],
+                [Jack, Jack, Jack, Ace, Queen],
+                vec![Jack, Ace, King],
+            ),
+            (
+                HandRank::FourOfAKind,
+                [Jack, Jack, Jack, Jack, Ace],
+                [Jack, Jack, Jack, Jack, King],
+                vec![Jack, Ace],
+            ),
+        ];
+        for (category, stronger, weaker, expected) in cases {
+            let make_cards = |ranks: [Rank; 5]| {
+                let suits = [
+                    Suit::Spades,
+                    Suit::Hearts,
+                    Suit::Diamonds,
+                    Suit::Clubs,
+                    Suit::Spades,
+                ];
+                std::array::from_fn::<_, 5, _>(|i| Card::new(ranks[i], suits[i]))
+            };
+            let strong_cards = make_cards(stronger);
+            let weak_cards = make_cards(weaker);
+            let strong = evaluate_hand(&strong_cards[..2], &strong_cards[2..]);
+            let weak = evaluate_hand(&weak_cards[..2], &weak_cards[2..]);
+            assert_eq!(strong.rank, category);
+            assert_eq!(weak.rank, category);
+            assert_eq!(strong.kickers, expected);
+            assert!(strong.kickers > weak.kickers, "{category:?}");
+        }
+    }
+
+    #[test]
+    fn board_two_pair_with_ace_kicker_still_ties_unplayed_hole_cards() {
+        use Rank::*;
+        use Suit::*;
+        let board = [
+            (Jack, Spades),
+            (Jack, Hearts),
+            (Two, Spades),
+            (Two, Hearts),
+            (Ace, Clubs),
+        ]
+        .map(|(rank, suit)| Card::new(rank, suit));
+        for hole in [
+            [Card::new(Four, Clubs), Card::new(Five, Diamonds)],
+            [Card::new(Six, Clubs), Card::new(Seven, Diamonds)],
+        ] {
+            let (evaluation, cards) = evaluate_best_five(&hole, &board).unwrap();
+            assert_eq!(evaluation.kickers, [Jack, Two, Ace]);
+            assert_eq!(cards, board);
+        }
     }
 
     #[test]

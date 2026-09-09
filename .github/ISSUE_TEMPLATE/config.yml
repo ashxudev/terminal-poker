@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Delivery method and backlog
+    url: https://github.com/ashxudev/terminal-poker/blob/main/docs/agile/README.md
+    about: Review the operating method and current backlog before opening work.

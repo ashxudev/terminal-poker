@@ -1,5 +1,6 @@
 use crate::game::actions::Action;
-use crate::game::state::{GameState, Player, BIG_BLIND};
+use crate::game::state::{GameState, BIG_BLIND};
+use crate::ui::app::LOCAL_SEAT;
 use crossterm::event::{KeyCode, KeyEvent};
 
 pub fn handle_key(
@@ -8,12 +9,12 @@ pub fn handle_key(
     raise_input: &mut String,
     raise_mode: &mut bool,
 ) -> Option<Action> {
-    if !game_state.is_player_turn() {
+    if !game_state.is_turn(LOCAL_SEAT) {
         return None;
     }
 
     let available = game_state.available_actions();
-    let stack = game_state.player_stack;
+    let stack = game_state.stack(LOCAL_SEAT);
 
     // When in raise mode, only raise-related keys are accepted
     if *raise_mode {
@@ -44,7 +45,7 @@ pub fn handle_key(
         // All-in
         KeyCode::Char('a') | KeyCode::Char('A') => {
             if stack > 0 {
-                Some(Action::AllIn(game_state.player_bet + stack))
+                Some(Action::AllIn(game_state.street_bet(LOCAL_SEAT) + stack))
             } else {
                 None
             }
@@ -70,8 +71,8 @@ fn handle_raise_mode_key(
     raise_mode: &mut bool,
 ) -> Option<Action> {
     let available = game_state.available_actions();
-    let to_call = game_state.amount_to_call(Player::Human);
-    let stack = game_state.player_stack;
+    let to_call = game_state.amount_to_call(LOCAL_SEAT);
+    let stack = game_state.stack(LOCAL_SEAT);
 
     match key.code {
         // Digits: append to BB input
@@ -90,7 +91,7 @@ fn handle_raise_mode_key(
         KeyCode::Up => {
             let current_bb = raise_input.parse::<u32>().unwrap_or(0);
             let min_bb = min_raise_bb(&available);
-            let max_bb = (game_state.player_bet + stack) / BIG_BLIND;
+            let max_bb = (game_state.street_bet(LOCAL_SEAT) + stack) / BIG_BLIND;
             let new_bb = (current_bb + 1).min(max_bb).max(min_bb);
             *raise_input = new_bb.to_string();
             None
@@ -137,7 +138,7 @@ fn min_raise_bb(available: &crate::game::actions::AvailableActions) -> u32 {
         .min_raise
         .unwrap_or(available.min_bet.unwrap_or(BIG_BLIND));
     // Convert chips to BB, rounding up
-    (min_chips + BIG_BLIND - 1) / BIG_BLIND
+    min_chips.div_ceil(BIG_BLIND)
 }
 
 fn submit_raise(
@@ -156,7 +157,7 @@ fn submit_raise(
     let min_raise = available
         .min_raise
         .unwrap_or(available.min_bet.unwrap_or(BIG_BLIND));
-    let max_bet = game_state.player_bet + stack;
+    let max_bet = game_state.street_bet(LOCAL_SEAT) + stack;
 
     let actual = chips.max(min_raise).min(max_bet);
 

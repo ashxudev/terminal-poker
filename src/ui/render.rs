@@ -1,15 +1,155 @@
 use crate::game::actions::Action;
 use crate::game::deck::Card;
-use crate::game::state::{GamePhase, Player, BIG_BLIND};
+use crate::game::seat::SeatId;
+use crate::game::state::{GamePhase, BIG_BLIND};
 use crate::stats::models::STAT_DEFINITIONS;
-use crate::ui::app::App;
+use crate::ui::app::{App, BOT_SEAT, LOCAL_SEAT};
+use crate::ui::lobby::LobbyView;
+use crate::ui::multiway_review::{MultiwayReviewSeatView, MultiwayReviewView};
 use ratatui::{
     layout::{Alignment, Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, BorderType, Borders, Clear, Paragraph, Wrap},
+    widgets::{Block, BorderType, Borders, Cell, Clear, Paragraph, Row, Table, Wrap},
     Frame,
 };
+
+pub fn render_lobby_view(frame: &mut Frame, view: &LobbyView) {
+    let area = frame.area();
+    let outer = Block::default()
+        .title(" TERMINAL POKER / PUBLIC TABLE DIRECTORY ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(TABLE_BORDER));
+    let inner = outer.inner(area);
+    frame.render_widget(outer, area);
+    let chunks = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(4),
+            Constraint::Length(3),
+            Constraint::Min(8),
+            Constraint::Length(5),
+        ])
+        .split(inner);
+
+    let header = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled(
+                "NETWORKED MULTI-TABLE RING",
+                Style::default()
+                    .fg(GOLD_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::raw(format!(
+                "  /  lobby revision {}  /  {} of {} registered",
+                view.lobby_revision,
+                view.tables.len(),
+                view.capacity
+            )),
+        ]),
+        Line::from(Span::styled(
+            format!("{}  /  checkpoint {}", view.build_id, view.checkpoint),
+            Style::default().fg(DIM),
+        )),
+    ])
+    .alignment(Alignment::Center);
+    frame.render_widget(header, chunks[0]);
+
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled("STATUS  ", Style::default().fg(LABEL)),
+            Span::styled(
+                &view.status,
+                Style::default()
+                    .fg(ACTION_CHECK)
+                    .add_modifier(Modifier::BOLD),
+            ),
+        ]))
+        .block(Block::default().borders(Borders::TOP | Borders::BOTTOM)),
+        chunks[1],
+    );
+
+    let header_row = Row::new([
+        "ID", "TABLE", "BLINDS", "STACK", "SEATS", "WAIT", "STATUS", "JOIN",
+    ])
+    .style(
+        Style::default()
+            .fg(GOLD_BRIGHT)
+            .add_modifier(Modifier::BOLD),
+    )
+    .bottom_margin(1);
+    let rows = view.tables.iter().map(|table| {
+        let selected = view.selected == Some(table.table_id);
+        let style = if selected {
+            Style::default()
+                .fg(Color::White)
+                .bg(FELT_GREEN)
+                .add_modifier(Modifier::BOLD)
+        } else {
+            Style::default().fg(Color::Gray)
+        };
+        Row::new(vec![
+            Cell::from(format!("T{}", table.table_id.0)),
+            Cell::from(table.name.clone()),
+            Cell::from(format!("{}/{}", table.small_blind, table.big_blind)),
+            Cell::from(table.starting_stack.to_string()),
+            Cell::from(format!(
+                "{}+{} / {} (min {})",
+                table.occupied,
+                table.reserved,
+                table.seats.get(),
+                table.min_players,
+            )),
+            Cell::from(table.waiting.to_string()),
+            Cell::from(format!("{:?}", table.status).to_uppercase()),
+            Cell::from(if table.joinable { "OPEN" } else { "LOCKED" }),
+        ])
+        .style(style)
+    });
+    let table = Table::new(
+        rows,
+        [
+            Constraint::Length(8),
+            Constraint::Length(28),
+            Constraint::Length(10),
+            Constraint::Length(10),
+            Constraint::Length(16),
+            Constraint::Length(6),
+            Constraint::Length(12),
+            Constraint::Length(10),
+        ],
+    )
+    .header(header_row)
+    .column_spacing(2)
+    .block(
+        Block::default()
+            .title(" SERVER-AUTHORITATIVE PUBLIC METADATA ")
+            .borders(Borders::ALL)
+            .border_type(BorderType::Rounded),
+    );
+    frame.render_widget(table, chunks[2]);
+
+    let footer = Paragraph::new(vec![
+        Line::from(vec![
+            Span::styled("ENTER", Style::default().fg(ACTION_CALL)),
+            Span::raw(" join selected   "),
+            Span::styled("N", Style::default().fg(ACTION_RAISE)),
+            Span::raw(" new public table   "),
+            Span::styled("R", Style::default().fg(ACTION_CHECK)),
+            Span::raw(" refresh   "),
+            Span::styled("Q", Style::default().fg(ACTION_FOLD)),
+            Span::raw(" quit"),
+        ]),
+        Line::from(Span::styled(
+            "PRIVACY  no cards / sessions / command ledgers / random state in lobby projection",
+            Style::default().fg(DIM),
+        )),
+    ])
+    .block(Block::default().borders(Borders::TOP))
+    .alignment(Alignment::Center);
+    frame.render_widget(footer, chunks[3]);
+}
 
 // ── Color Palette ──────────────────────────────────────────
 const FELT_GREEN: Color = Color::Rgb(0, 80, 40);
@@ -102,9 +242,7 @@ fn render_card_lines(card: &Card) -> [Line<'static>; 5] {
 
 fn render_facedown_lines() -> [Line<'static>; 5] {
     let bg_style = Style::default().bg(CARD_BACK);
-    let back_style = Style::default()
-        .fg(Color::Rgb(100, 100, 170))
-        .bg(CARD_BACK);
+    let back_style = Style::default().fg(Color::Rgb(100, 100, 170)).bg(CARD_BACK);
 
     [
         Line::from(Span::styled("       ", bg_style)),
@@ -157,6 +295,10 @@ fn compose_card_row(cards: &[[Line<'static>; 5]], gap: &str) -> Vec<Line<'static
 // ── Main Render ────────────────────────────────────────────
 
 pub fn render(frame: &mut Frame, app: &App) {
+    if let Some(view) = &app.multiway_review {
+        render_multiway_review(frame, view);
+        return;
+    }
     let size = frame.area();
 
     // Outer table border (replaces margin(1))
@@ -219,7 +361,11 @@ pub fn render(frame: &mut Frame, app: &App) {
     // chunks[7] = bot action indicator / showdown result
     if app.showdown_result_shown {
         if let Some(ref result) = app.game_state.showdown_result {
-            let line = showdown_indicator_line(result.winner, Player::Bot, &result.bot_hand.description);
+            let description = &result
+                .hand_for(BOT_SEAT)
+                .expect("offline showdown includes the bot seat")
+                .description;
+            let line = showdown_indicator_line(result.winner, BOT_SEAT, description);
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), chunks[7]);
         }
     } else if app.bot_thinking {
@@ -269,6 +415,510 @@ pub fn render(frame: &mut Frame, app: &App) {
     }
 }
 
+fn render_multiway_review(frame: &mut Frame, view: &MultiwayReviewView) {
+    let size = frame.area();
+    let outer = Block::default()
+        .title(if view.lifecycle.is_some() {
+            " AUTHORITATIVE TABLE LIFECYCLE / RATATUI "
+        } else if view.client.is_some() {
+            " NETWORK CLIENT / AUTHORITATIVE PROJECTION "
+        } else {
+            " MULTIWAY TABLE / READ ONLY REVIEW "
+        })
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(TABLE_BORDER));
+    let inner = outer.inner(size);
+    frame.render_widget(outer, size);
+
+    let dense_seats = view.seats.len() > 6;
+    let compact_height = inner.height < 44;
+    let status_height = 2 + u16::from(view.client.is_some()) + u16::from(view.lifecycle.is_some());
+    let seats_height = if dense_seats {
+        if compact_height {
+            14
+        } else {
+            18
+        }
+    } else {
+        11
+    };
+    let board_height = if compact_height { 9 } else { 11 };
+    let pots_height = if compact_height { 3 } else { 4 };
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(status_height),
+            Constraint::Length(seats_height),
+            Constraint::Length(board_height),
+            Constraint::Length(pots_height),
+            Constraint::Min(5),
+        ])
+        .split(inner);
+
+    let mut status = vec![
+        Line::from(vec![
+            Span::styled(
+                format!(" {} ", view.phase.name().to_uppercase()),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(ACTION_CALL)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    "  {}  /  {}  /  seed {}  /  {}",
+                    view.build_id, view.hand_id, view.seed, view.checkpoint
+                ),
+                Style::default().fg(LABEL),
+            ),
+        ]),
+        if let Some(protocol) = &view.protocol {
+            Line::from(vec![
+                Span::styled(
+                    format!(" PROTOCOL v{} ", protocol.version),
+                    Style::default()
+                        .fg(Color::Black)
+                        .bg(GOLD_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        " TABLE {}  HAND {}  REV {}  VIEW {}  CMD {}  {}",
+                        protocol.table_id,
+                        protocol.hand_id,
+                        protocol.revision,
+                        protocol.audience,
+                        protocol.command_id,
+                        protocol.outcome
+                    ),
+                    Style::default().fg(LABEL),
+                ),
+            ])
+        } else {
+            Line::from(vec![
+                Span::styled(" POT ", Style::default().fg(GOLD_BRIGHT)),
+                Span::styled(
+                    view.pot_total.to_string(),
+                    Style::default()
+                        .fg(GOLD_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+                Span::styled(
+                    format!(
+                        "    BLINDS {}/{}  ANTE {}    CURRENT WAGER {}    PLAYER VIEW S{}",
+                        view.small_blind_amount,
+                        view.big_blind_amount,
+                        view.ante_amount,
+                        view.current_wager,
+                        view.local_seat.as_u8()
+                    ),
+                    Style::default().fg(DIM),
+                ),
+            ])
+        },
+    ];
+    if let Some(client) = &view.client {
+        status.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", client.connection),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(if client.connection == "CONNECTED" {
+                        ACTION_CHECK
+                    } else {
+                        GOLD_BRIGHT
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    " STREAM {}  PENDING {}  DEADLINE {}  CONTROLS {}",
+                    client.stream_sequence,
+                    client.pending_command,
+                    client.deadline,
+                    client.controls
+                ),
+                Style::default().fg(LABEL),
+            ),
+        ]));
+    }
+    if let Some(lifecycle) = &view.lifecycle {
+        status.push(Line::from(vec![
+            Span::styled(
+                format!(" {} ", lifecycle.state),
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(if lifecycle.state == "PAUSED" {
+                        GOLD_BRIGHT
+                    } else if lifecycle.state == "CLOSED" {
+                        ACTION_FOLD
+                    } else {
+                        ACTION_CHECK
+                    })
+                    .add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!(
+                    " HAND {}  OCCUPIED {}  ELIGIBLE {}  RESERVED {}  PENDING {}  |  {}",
+                    if lifecycle.hand_active {
+                        "ACTIVE"
+                    } else {
+                        "BOUNDARY"
+                    },
+                    lifecycle.occupied,
+                    lifecycle.eligible,
+                    lifecycle.reservations,
+                    lifecycle.pending,
+                    lifecycle.boundary
+                ),
+                Style::default().fg(LABEL),
+            ),
+        ]));
+    }
+    frame.render_widget(Paragraph::new(status), rows[0]);
+
+    let seat_areas = multiway_seat_areas(rows[1], view.seats.len());
+    for (seat, area) in view.seats.iter().zip(seat_areas.iter()) {
+        render_multiway_seat(
+            frame,
+            seat,
+            *area,
+            view.highlight_local_seat.then_some(view.local_seat),
+        );
+    }
+
+    let board_block = Block::default()
+        .title(" BOARD ")
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .style(Style::default().bg(FELT_GREEN))
+        .border_style(Style::default().fg(TABLE_BORDER));
+    let board_inner = board_block.inner(rows[2]);
+    frame.render_widget(board_block, rows[2]);
+    let board_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(2),
+            Constraint::Length(5),
+            Constraint::Length(2),
+        ])
+        .split(board_inner);
+    frame.render_widget(
+        Paragraph::new(Line::from(Span::styled(
+            format!("POT: {} chips", view.pot_total),
+            Style::default()
+                .fg(GOLD_BRIGHT)
+                .bg(FELT_GREEN)
+                .add_modifier(Modifier::BOLD),
+        )))
+        .alignment(Alignment::Center)
+        .style(Style::default().bg(FELT_GREEN)),
+        board_rows[0],
+    );
+    let cards: Vec<[Line<'static>; 5]> = (0..5)
+        .map(|index| {
+            view.board
+                .get(index)
+                .map_or_else(render_empty_slot_lines, render_card_lines)
+        })
+        .collect();
+    frame.render_widget(
+        Paragraph::new(compose_card_row(&cards, " "))
+            .alignment(Alignment::Center)
+            .style(Style::default().bg(FELT_GREEN)),
+        board_rows[1],
+    );
+    let actor = view.seats.iter().find(|seat| seat.to_act).map_or_else(
+        || "TO ACT: -".to_string(),
+        |seat| format!("TO ACT: S{}", seat.seat.as_u8()),
+    );
+    frame.render_widget(
+        Paragraph::new(actor)
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(ACTION_CALL).bg(FELT_GREEN)),
+        board_rows[2],
+    );
+
+    let pot_text = if view.pots.is_empty() {
+        format!(
+            " LIVE POT {} / side pots form at terminal contribution caps ",
+            view.pot_total
+        )
+    } else {
+        view.pots
+            .iter()
+            .map(|pot| {
+                let eligible = pot
+                    .eligible
+                    .iter()
+                    .map(|seat| format!("S{}", seat.as_u8()))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let winners = pot
+                    .winners
+                    .iter()
+                    .map(|seat| format!("S{}", seat.as_u8()))
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let result = if winners.is_empty() {
+                    "pending"
+                } else {
+                    &winners
+                };
+                if view.pots.len() > 3 {
+                    format!("{} {} -> {}", pot.label, pot.amount, result)
+                } else {
+                    format!(
+                        "{} {} [eligible {}] -> {}",
+                        pot.label, pot.amount, eligible, result
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("   |   ")
+    };
+    frame.render_widget(
+        Paragraph::new(pot_text)
+            .block(
+                Block::default()
+                    .title(" POTS / AWARDS ")
+                    .borders(Borders::ALL)
+                    .border_type(BorderType::Rounded)
+                    .border_style(Style::default().fg(TABLE_BORDER)),
+            )
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: true })
+            .style(Style::default().fg(GOLD)),
+        rows[3],
+    );
+
+    let log_lines = view
+        .action_log
+        .iter()
+        .rev()
+        .take(rows[4].height.saturating_sub(2) as usize)
+        .rev()
+        .map(|entry| {
+            Line::from(Span::styled(
+                format!("  {entry}"),
+                Style::default().fg(LABEL),
+            ))
+        })
+        .collect::<Vec<_>>();
+    frame.render_widget(
+        Paragraph::new(log_lines).block(
+            Block::default()
+                .title(" AUTHORITATIVE ACTION / HAND HISTORY ")
+                .borders(Borders::ALL)
+                .border_type(BorderType::Rounded)
+                .border_style(Style::default().fg(TABLE_BORDER)),
+        ),
+        rows[4],
+    );
+}
+
+/// Render a production network client directly from its projection-derived view.
+/// This deliberately bypasses the offline [`App`] and its review-fixture field.
+pub fn render_network_view(frame: &mut Frame, view: &MultiwayReviewView) {
+    render_network_view_with_console_scroll(frame, view, 0);
+}
+
+pub fn render_network_view_with_console_scroll(
+    frame: &mut Frame,
+    view: &MultiwayReviewView,
+    console_scroll: usize,
+) {
+    crate::ui::ash_table::render_with_console_scroll(frame, view, console_scroll);
+}
+
+/// Render the production table with the installed Quick Practice lifecycle hint.
+pub fn render_practice_view(frame: &mut Frame, view: &MultiwayReviewView) {
+    render_practice_view_with_raise(frame, view, None);
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RaiseSizingView {
+    pub target: u32,
+    pub minimum: u32,
+    pub maximum: u32,
+    pub preset_index: Option<usize>,
+}
+
+/// Render Quick Practice plus its local, presentation-only raise sizing state.
+/// The selected amount is still submitted through the ordinary authority.
+pub fn render_practice_view_with_raise(
+    frame: &mut Frame,
+    view: &MultiwayReviewView,
+    raise: Option<RaiseSizingView>,
+) {
+    let showdown = matches!(
+        view.phase,
+        crate::game::multiway::MultiwayPhase::Showdown
+            | crate::game::multiway::MultiwayPhase::HandComplete
+    )
+    .then_some(crate::ui::multiway_review::ShowdownStage::Award);
+    render_practice_view_with_state(frame, view, raise, 0, showdown);
+}
+
+pub fn render_practice_view_with_state(
+    frame: &mut Frame,
+    view: &MultiwayReviewView,
+    raise: Option<RaiseSizingView>,
+    console_scroll: usize,
+    showdown: Option<crate::ui::multiway_review::ShowdownStage>,
+) {
+    crate::ui::ash_table::render_with_state(
+        frame,
+        view,
+        console_scroll,
+        raise.map(|value| (value.preset_index, value.target)),
+        showdown,
+    );
+}
+
+fn multiway_seat_areas(area: Rect, seat_count: usize) -> Vec<Rect> {
+    if seat_count <= 6 {
+        return Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![Constraint::Ratio(1, seat_count as u32); seat_count])
+            .split(area)
+            .to_vec();
+    }
+    let top_count = seat_count.div_ceil(2);
+    let bottom_count = seat_count - top_count;
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Ratio(1, 2), Constraint::Ratio(1, 2)])
+        .split(area);
+    let mut areas = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints(vec![Constraint::Ratio(1, top_count as u32); top_count])
+        .split(rows[0])
+        .to_vec();
+    areas.extend(
+        Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints(vec![
+                Constraint::Ratio(1, bottom_count as u32);
+                bottom_count
+            ])
+            .split(rows[1])
+            .iter()
+            .copied(),
+    );
+    areas
+}
+
+fn render_multiway_seat(
+    frame: &mut Frame,
+    seat: &MultiwayReviewSeatView,
+    area: Rect,
+    local_seat: Option<SeatId>,
+) {
+    let title = format!(
+        " S{}{}{} ",
+        seat.seat.as_u8(),
+        if seat.position.is_empty() { "" } else { " / " },
+        seat.position
+    );
+    let border_color = if local_seat == Some(seat.seat) {
+        ACTION_CALL
+    } else {
+        TABLE_BORDER
+    };
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_type(BorderType::Rounded)
+        .border_style(Style::default().fg(border_color));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if area.height < 11 || area.width < 18 {
+        let cards = if seat.cards_visible {
+            seat.cards
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(" ")
+        } else {
+            "?? ??".to_string()
+        };
+        let compact = vec![
+            Line::from(Span::styled(
+                format!("{} / IN {}", seat.stack, seat.contribution),
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            )),
+            Line::from(Span::styled(cards, Style::default().fg(LABEL))),
+            Line::from(Span::styled(
+                if seat.to_act {
+                    format!("{} / ACT", seat.status)
+                } else {
+                    seat.status.clone()
+                },
+                Style::default().fg(if seat.to_act { GOLD_BRIGHT } else { DIM }),
+            )),
+        ];
+        frame.render_widget(
+            Paragraph::new(compact)
+                .alignment(Alignment::Center)
+                .wrap(Wrap { trim: true }),
+            inner,
+        );
+        return;
+    }
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),
+            Constraint::Length(5),
+            Constraint::Length(1),
+            Constraint::Length(1),
+        ])
+        .split(inner);
+    frame.render_widget(
+        Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("STACK {}", seat.stack),
+                Style::default().fg(GOLD).add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(
+                format!("  IN {}", seat.contribution),
+                Style::default().fg(ACTION_CALL),
+            ),
+        ]))
+        .alignment(Alignment::Center),
+        rows[0],
+    );
+    let cards = if seat.cards_visible {
+        seat.cards.iter().map(render_card_lines).collect::<Vec<_>>()
+    } else {
+        vec![render_facedown_lines(), render_facedown_lines()]
+    };
+    frame.render_widget(
+        Paragraph::new(compose_card_row(&cards, " ")).alignment(Alignment::Center),
+        rows[1],
+    );
+    frame.render_widget(
+        Paragraph::new(seat.status.clone())
+            .alignment(Alignment::Center)
+            .style(Style::default().fg(DIM)),
+        rows[2],
+    );
+    if seat.to_act {
+        frame.render_widget(
+            Paragraph::new("[TO ACT]")
+                .alignment(Alignment::Center)
+                .style(
+                    Style::default()
+                        .fg(GOLD_BRIGHT)
+                        .add_modifier(Modifier::BOLD),
+                ),
+            rows[3],
+        );
+    }
+}
+
 // ── Status Bar ─────────────────────────────────────────────
 
 fn render_status_bar(frame: &mut Frame, app: &App, area: Rect) {
@@ -315,11 +965,11 @@ fn render_opponent_label(frame: &mut Frame, _app: &App, area: Rect) {
 
 fn render_opponent_stack(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span<'static>> = vec![Span::styled(
-        format_bb(app.game_state.bot_stack),
+        format_bb(app.game_state.stack(BOT_SEAT)),
         Style::default().fg(GOLD),
     )];
 
-    if app.game_state.button == Player::Bot {
+    if app.game_state.button == BOT_SEAT {
         spans.push(Span::styled(" [D]", Style::default().fg(BTN_COLOR)));
     }
 
@@ -332,7 +982,7 @@ fn render_opponent_stack(frame: &mut Frame, app: &App, area: Rect) {
 fn render_opponent_cards(frame: &mut Frame, app: &App, area: Rect) {
     let card_data: Vec<[Line<'static>; 5]> = if app.showdown_revealed {
         app.game_state
-            .bot_cards
+            .hole_cards(BOT_SEAT)
             .iter()
             .map(|c| render_card_lines(c))
             .collect()
@@ -408,7 +1058,7 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
         app.game_state.pot
     };
     let pot_text = format!("POT: {}", format_bb(display_pot));
-    let to_call = app.game_state.amount_to_call(Player::Human);
+    let to_call = app.game_state.amount_to_call(LOCAL_SEAT);
     let call_text = if to_call > 0 {
         format!("To call: {}", format_bb(to_call))
     } else {
@@ -417,7 +1067,11 @@ fn render_board_box(frame: &mut Frame, app: &App, area: Rect) {
 
     // 39 = 5 cards × 7 chars + 4 separators (matches card row width)
     let content_len = pot_text.len() + call_text.len();
-    let padding = if content_len < 39 { 39 - content_len } else { 2 };
+    let padding = if content_len < 39 {
+        39 - content_len
+    } else {
+        2
+    };
 
     let mut info_spans: Vec<Span<'static>> = vec![
         Span::styled("POT: ", pot_style),
@@ -470,25 +1124,35 @@ fn action_label(action: &Action) -> &'static str {
     }
 }
 
-fn showdown_indicator_line(winner: Option<Player>, this_player: Player, description: &str) -> Line<'static> {
+fn showdown_indicator_line(
+    winner: Option<SeatId>,
+    this_player: SeatId,
+    description: &str,
+) -> Line<'static> {
     let mut spans = Vec::new();
     match winner {
         Some(w) if w == this_player => {
             spans.push(Span::styled(
                 "[WIN] ",
-                Style::default().fg(GOLD_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(GOLD_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         None => {
             spans.push(Span::styled(
                 "[TIE] ",
-                Style::default().fg(GOLD_BRIGHT).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(GOLD_BRIGHT)
+                    .add_modifier(Modifier::BOLD),
             ));
         }
         _ => {
             spans.push(Span::styled(
                 "[LOSE] ",
-                Style::default().fg(Color::Rgb(140, 140, 140)).add_modifier(Modifier::BOLD),
+                Style::default()
+                    .fg(Color::Rgb(140, 140, 140))
+                    .add_modifier(Modifier::BOLD),
             ));
         }
     }
@@ -502,7 +1166,11 @@ fn showdown_indicator_line(winner: Option<Player>, this_player: Player, descript
 fn render_player_label(frame: &mut Frame, app: &App, area: Rect) {
     if app.showdown_result_shown {
         if let Some(ref result) = app.game_state.showdown_result {
-            let line = showdown_indicator_line(result.winner, Player::Human, &result.player_hand.description);
+            let description = &result
+                .hand_for(LOCAL_SEAT)
+                .expect("offline showdown includes the local seat")
+                .description;
+            let line = showdown_indicator_line(result.winner, LOCAL_SEAT, description);
             frame.render_widget(Paragraph::new(line).alignment(Alignment::Center), area);
         }
     } else if let Some(ref action) = app.player_last_action {
@@ -517,11 +1185,11 @@ fn render_player_label(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_player_stack(frame: &mut Frame, app: &App, area: Rect) {
     let mut spans: Vec<Span<'static>> = vec![Span::styled(
-        format_bb(app.game_state.player_stack),
+        format_bb(app.game_state.stack(LOCAL_SEAT)),
         Style::default().fg(GOLD),
     )];
 
-    if app.game_state.button == Player::Human {
+    if app.game_state.button == LOCAL_SEAT {
         spans.push(Span::styled(" [D]", Style::default().fg(BTN_COLOR)));
     }
 
@@ -534,7 +1202,7 @@ fn render_player_stack(frame: &mut Frame, app: &App, area: Rect) {
 fn render_player_cards(frame: &mut Frame, app: &App, area: Rect) {
     let card_data: Vec<[Line<'static>; 5]> = app
         .game_state
-        .player_cards
+        .hole_cards(LOCAL_SEAT)
         .iter()
         .map(|c| render_card_lines(c))
         .collect();
@@ -550,12 +1218,12 @@ const BRIGHT_WHITE: Color = Color::Rgb(220, 220, 220);
 
 fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
     let available = app.game_state.available_actions();
-    let is_player_turn = app.game_state.is_player_turn();
+    let is_player_turn = app.game_state.is_turn(LOCAL_SEAT);
 
     let mut spans: Vec<Span<'static>> = Vec::new();
 
     if app.showdown_result_shown {
-        if app.game_state.player_stack == 0 || app.game_state.bot_stack == 0 {
+        if app.game_state.stack(LOCAL_SEAT) == 0 || app.game_state.stack(BOT_SEAT) == 0 {
             spans.push(Span::styled(
                 " Game Over! Press any key ",
                 Style::default()
@@ -577,34 +1245,44 @@ fn render_action_bar(frame: &mut Frame, app: &App, area: Rect) {
         if available.can_fold {
             spans.push(Span::styled(
                 " F Fold ",
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_FOLD_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_FOLD_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if available.can_check {
             spans.push(Span::styled(
                 " C Check ",
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CHECK_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_CHECK_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if let Some(amount) = available.can_call {
             spans.push(Span::styled(
                 format!(" C Call {} ", format_bb(amount)),
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CALL_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_CALL_BG),
             ));
             spans.push(Span::raw("   "));
         }
         if available.min_bet.is_some() || available.min_raise.is_some() {
             spans.push(Span::styled(
                 " R Raise ",
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_RAISE_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_RAISE_BG),
             ));
             spans.push(Span::raw("   "));
         }
         spans.push(Span::styled(
             " A All-in ",
-            Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_ALLIN_BG),
+            Style::default()
+                .fg(Color::Rgb(255, 255, 255))
+                .bg(ACTION_ALLIN_BG),
         ));
     }
 
@@ -620,9 +1298,9 @@ fn render_raise_bar(
     let min_chips = available
         .min_raise
         .unwrap_or(available.min_bet.unwrap_or(2));
-    let min_bb = (min_chips + 1) / 2;
+    let min_bb = min_chips.div_ceil(2);
     let pot_bb = app.game_state.pot / 2;
-    let stack_bb = (app.game_state.player_bet + app.game_state.player_stack) / 2;
+    let stack_bb = (app.game_state.street_bet(LOCAL_SEAT) + app.game_state.stack(LOCAL_SEAT)) / 2;
 
     spans.push(Span::styled(
         "Raise to: ",
@@ -644,7 +1322,10 @@ fn render_raise_bar(
                 .fg(BRIGHT_WHITE)
                 .add_modifier(Modifier::BOLD),
         ));
-        if typed_bb > 0 && typed_bb * 2 >= app.game_state.player_bet + app.game_state.player_stack {
+        if typed_bb > 0
+            && typed_bb * 2
+                >= app.game_state.street_bet(LOCAL_SEAT) + app.game_state.stack(LOCAL_SEAT)
+        {
             spans.push(Span::styled(" (all-in)", Style::default().fg(GOLD)));
         } else if typed_bb > 0 && typed_bb < min_bb {
             spans.push(Span::styled(
@@ -803,6 +1484,7 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
     frame.render_widget(Clear, area);
 
     let stats = &app.game_state;
+    let local_stats = stats.seat_stats(LOCAL_SEAT);
     let section_style = Style::default().fg(GOLD).add_modifier(Modifier::BOLD);
     let label_style = Style::default().fg(Color::Rgb(180, 180, 180));
     let value_style = Style::default()
@@ -810,11 +1492,11 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
         .add_modifier(Modifier::BOLD);
 
     let win_rate = if stats.hands_played > 0 {
-        stats.hands_won as f64 / stats.hands_played as f64 * 100.0
+        local_stats.hands_won as f64 / stats.hands_played as f64 * 100.0
     } else {
         0.0
     };
-    let profit = stats.session_profit_bb();
+    let profit = stats.session_profit_bb(LOCAL_SEAT);
     let profit_color = if profit > 0.0 {
         ACTION_CHECK
     } else if profit < 0.0 {
@@ -830,7 +1512,7 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
             Span::styled("  Hands: ", label_style),
             Span::styled(format!("{}", stats.hands_played), value_style),
             Span::styled("   Won: ", label_style),
-            Span::styled(format!("{}", stats.hands_won), value_style),
+            Span::styled(format!("{}", local_stats.hands_won), value_style),
             Span::styled(format!("  ({:.0}%)", win_rate), label_style),
         ]),
         Line::from(vec![
@@ -865,17 +1547,16 @@ fn render_stats_overlay(frame: &mut Frame, app: &App) {
     frame.render_widget(paragraph, area);
 }
 
-
 fn render_session_end_overlay(frame: &mut Frame, app: &App) {
     let area = centered_rect(50, 50, frame.area());
     frame.render_widget(Clear, area);
 
-    let winner = if app.game_state.player_stack == 0 {
+    let winner = if app.game_state.stack(LOCAL_SEAT) == 0 {
         "You busted!"
     } else {
         "Bot busted! You win!"
     };
-    let winner_color = if app.game_state.player_stack == 0 {
+    let winner_color = if app.game_state.stack(LOCAL_SEAT) == 0 {
         ACTION_FOLD
     } else {
         ACTION_CHECK
@@ -887,6 +1568,7 @@ fn render_session_end_overlay(frame: &mut Frame, app: &App) {
         .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
 
+    let local_stats = app.game_state.seat_stats(LOCAL_SEAT);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -910,26 +1592,30 @@ fn render_session_end_overlay(frame: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("  Hands won: ", label_style),
-            Span::styled(format!("{}", app.game_state.hands_won), value_style),
+            Span::styled(format!("{}", local_stats.hands_won), value_style),
         ]),
         Line::from(vec![
             Span::styled("  Biggest pot won: ", label_style),
-            Span::styled(format_bb(app.game_state.biggest_pot_won), value_style),
+            Span::styled(format_bb(local_stats.biggest_pot_won), value_style),
         ]),
         Line::from(vec![
             Span::styled("  Biggest pot lost: ", label_style),
-            Span::styled(format_bb(app.game_state.biggest_pot_lost), value_style),
+            Span::styled(format_bb(local_stats.biggest_pot_lost), value_style),
         ]),
         Line::from(""),
         Line::from(vec![
             Span::styled(
                 " N New Session ",
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_CHECK_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_CHECK_BG),
             ),
             Span::raw("   "),
             Span::styled(
                 " Q Quit ",
-                Style::default().fg(Color::Rgb(255, 255, 255)).bg(ACTION_FOLD_BG),
+                Style::default()
+                    .fg(Color::Rgb(255, 255, 255))
+                    .bg(ACTION_FOLD_BG),
             ),
         ]),
     ];
@@ -944,7 +1630,7 @@ fn render_summary_overlay(frame: &mut Frame, app: &App) {
     let area = centered_rect(50, 40, frame.area());
     frame.render_widget(Clear, area);
 
-    let profit = app.game_state.session_profit_bb();
+    let profit = app.game_state.session_profit_bb(LOCAL_SEAT);
     let profit_color = if profit > 0.0 {
         ACTION_CHECK
     } else if profit < 0.0 {
@@ -958,6 +1644,7 @@ fn render_summary_overlay(frame: &mut Frame, app: &App) {
         .fg(Color::Rgb(255, 255, 255))
         .add_modifier(Modifier::BOLD);
 
+    let local_stats = app.game_state.seat_stats(LOCAL_SEAT);
     let lines = vec![
         Line::from(""),
         Line::from(Span::styled(
@@ -973,7 +1660,7 @@ fn render_summary_overlay(frame: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("  Hands won: ", label_style),
-            Span::styled(format!("{}", app.game_state.hands_won), value_style),
+            Span::styled(format!("{}", local_stats.hands_won), value_style),
         ]),
         Line::from(vec![
             Span::styled("  Session P/L: ", label_style),

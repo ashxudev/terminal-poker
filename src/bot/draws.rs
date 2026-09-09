@@ -95,7 +95,11 @@ fn detect_straight_draws(hole_cards: &[Card], board: &[Card], info: &mut DrawInf
     // Sliding window of 5 consecutive values.
     for base in 1..=10u8 {
         let window: Vec<u8> = (base..base + 5).collect();
-        let present: Vec<u8> = window.iter().copied().filter(|v| rank_set.contains(v)).collect();
+        let present: Vec<u8> = window
+            .iter()
+            .copied()
+            .filter(|v| rank_set.contains(v))
+            .collect();
         let missing: Vec<u8> = window
             .iter()
             .copied()
@@ -158,7 +162,10 @@ mod tests {
 
     #[test]
     fn test_flush_draw() {
-        let hole = [card(Rank::Eight, Suit::Hearts), card(Rank::Nine, Suit::Hearts)];
+        let hole = [
+            card(Rank::Eight, Suit::Hearts),
+            card(Rank::Nine, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Two, Suit::Hearts),
             card(Rank::King, Suit::Spades),
@@ -171,7 +178,10 @@ mod tests {
 
     #[test]
     fn test_no_flush_draw_when_flush_made() {
-        let hole = [card(Rank::Eight, Suit::Hearts), card(Rank::Nine, Suit::Hearts)];
+        let hole = [
+            card(Rank::Eight, Suit::Hearts),
+            card(Rank::Nine, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Two, Suit::Hearts),
             card(Rank::King, Suit::Hearts),
@@ -184,7 +194,10 @@ mod tests {
     #[test]
     fn test_oesd() {
         // J-T with 9-8 on board: 8-9-T-J present, missing 7 (low end) or Q (high end)
-        let hole = [card(Rank::Jack, Suit::Spades), card(Rank::Ten, Suit::Hearts)];
+        let hole = [
+            card(Rank::Jack, Suit::Spades),
+            card(Rank::Ten, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Nine, Suit::Clubs),
             card(Rank::Eight, Suit::Diamonds),
@@ -197,7 +210,10 @@ mod tests {
     #[test]
     fn test_gutshot_wheel() {
         // A-5 with 3-4 on board: window [1,2,3,4,5], present=[1,3,4,5], missing=[2] (interior)
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::Five, Suit::Hearts)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Five, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Three, Suit::Clubs),
             card(Rank::Four, Suit::Diamonds),
@@ -209,7 +225,10 @@ mod tests {
 
     #[test]
     fn test_overcards() {
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Hearts)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Queen, Suit::Clubs),
             card(Rank::Five, Suit::Diamonds),
@@ -221,7 +240,10 @@ mod tests {
 
     #[test]
     fn test_backdoor_flush_on_flop() {
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Spades)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Spades),
+        ];
         let board = [
             card(Rank::Queen, Suit::Clubs),
             card(Rank::Five, Suit::Spades),
@@ -233,7 +255,10 @@ mod tests {
 
     #[test]
     fn test_empty_board() {
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Hearts)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+        ];
         let info = detect_draws(&hole, &[]);
         assert!(!info.flush_draw);
         assert!(!info.oesd);
@@ -246,7 +271,10 @@ mod tests {
     #[test]
     fn test_broadway_draw_is_gutshot_not_oesd() {
         // J-Q-K-A with board, missing T: only one end open (nothing above A)
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::King, Suit::Hearts)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::King, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Queen, Suit::Clubs),
             card(Rank::Jack, Suit::Diamonds),
@@ -260,7 +288,10 @@ mod tests {
     #[test]
     fn test_wheel_draw_is_gutshot_not_oesd() {
         // A-2-3-4 with board, missing 5: only one end open (nothing below A-low)
-        let hole = [card(Rank::Ace, Suit::Spades), card(Rank::Four, Suit::Hearts)];
+        let hole = [
+            card(Rank::Ace, Suit::Spades),
+            card(Rank::Four, Suit::Hearts),
+        ];
         let board = [
             card(Rank::Two, Suit::Clubs),
             card(Rank::Three, Suit::Diamonds),
@@ -273,7 +304,10 @@ mod tests {
 
     #[test]
     fn test_no_draws() {
-        let hole = [card(Rank::Two, Suit::Spades), card(Rank::Seven, Suit::Hearts)];
+        let hole = [
+            card(Rank::Two, Suit::Spades),
+            card(Rank::Seven, Suit::Hearts),
+        ];
         let board = [
             card(Rank::King, Suit::Clubs),
             card(Rank::Jack, Suit::Diamonds),

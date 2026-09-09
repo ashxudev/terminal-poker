@@ -19,14 +19,89 @@ path = "src/main.rs"
 name = "poker"
 path = "src/main.rs"
 
+[[bin]]
+name = "review-hand"
+path = "src/bin/review_hand.rs"
+
+[[bin]]
+name = "review-multiway"
+path = "src/bin/review_multiway.rs"
+
+[[bin]]
+name = "review-protocol"
+path = "src/bin/review_protocol.rs"
+
+[[bin]]
+name = "review-table-actor"
+path = "src/bin/review_table_actor.rs"
+
+[[bin]]
+name = "review-authorized-table"
+path = "src/bin/review_authorized_table.rs"
+
+[[bin]]
+name = "review-network-client"
+path = "src/bin/review_network_client.rs"
+
+[[bin]]
+name = "review-table-lifecycle"
+path = "src/bin/review_table_lifecycle.rs"
+
+[[bin]]
+name = "poker-server"
+path = "src/bin/poker_server.rs"
+
+[[bin]]
+name = "poker-client"
+path = "src/bin/poker_client.rs"
+
+[[bin]]
+name = "poker-train"
+path = "src/bin/poker_train.rs"
+
+[[bin]]
+name = "poker-benchmark"
+path = "src/bin/poker_benchmark.rs"
+
+[[bin]]
+name = "poker-adversary"
+path = "src/bin/poker_adversary.rs"
+
+[[bin]]
+name = "render-ui-concepts"
+path = "src/bin/render_ui_concepts.rs"
+
+[[bin]]
+name = "sneakyblinders"
+path = "src/bin/sneakyblinders.rs"
+
+[[bin]]
+name = "review-sprint14"
+path = "src/bin/review_sprint14.rs"
+
+[[bin]]
+name = "review-sprint16"
+path = "src/bin/review_sprint16.rs"
+
 [dependencies]
-ratatui = "0.29"
-crossterm = "0.28"
+argon2 = { version = "=0.5.3", default-features = false, features = ["alloc"] }
+ratatui = "0.30.2"
+ratatui-image = { version = "=11.0.8", default-features = false, features = ["crossterm"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+crossterm = "0.29"
+tachyonfx = "0.25.1"
 rand = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 clap = { version = "4.0", features = ["derive"] }
 dirs = "5.0"
+sha2 = "0.10"
+ctrlc = "3.4"
+rustls = { version = "=0.23.44", default-features = false, features = ["ring", "std", "tls12"] }
+rustls-pemfile = "2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Threading", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }
 
 [profile.release]
 lto = true

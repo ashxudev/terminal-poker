@@ -1,3 +1,22 @@
+use terminal_poker::game::actions::Action;
+use terminal_poker::game::command::SeatCommand;
+use terminal_poker::game::seat::SeatId;
+use terminal_poker::game::state::GameState;
+
+fn apply_action(state: &mut GameState, seat: SeatId, action: Action) {
+    state
+        .apply_command(SeatCommand::new(seat, action))
+        .expect("integration-test action must be legal");
+}
+
+fn local_seat() -> SeatId {
+    SeatId::new(0).unwrap()
+}
+
+fn bot_seat() -> SeatId {
+    SeatId::new(1).unwrap()
+}
+
 mod game_logic {
     // Test the game state machine directly
     use std::path::PathBuf;
@@ -55,25 +74,27 @@ mod game_logic {
         assert!(output.status.success());
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(stdout.contains("terminal-poker"));
-        assert!(stdout.contains("0.1.0"));
+        assert!(stdout.contains(env!("CARGO_PKG_VERSION")));
     }
 }
 
 // Test game state machine
 #[cfg(test)]
 mod state_machine_tests {
+    use super::{apply_action, bot_seat, local_seat};
+
     #[test]
     fn test_full_hand_to_showdown() {
         // This tests the core game logic path
         use terminal_poker::game::actions::Action;
-        use terminal_poker::game::state::{GamePhase, GameState, Player};
+        use terminal_poker::game::state::{GamePhase, GameState};
 
         let mut state = GameState::new(100);
 
         // Verify initial state
         assert_eq!(state.phase, GamePhase::Preflop);
-        assert_eq!(state.player_cards.len(), 2);
-        assert_eq!(state.bot_cards.len(), 2);
+        assert_eq!(state.hole_cards(local_seat()).len(), 2);
+        assert_eq!(state.hole_cards(bot_seat()).len(), 2);
         assert!(state.board.is_empty());
 
         // Both players call/check to showdown
@@ -95,7 +116,8 @@ mod state_machine_tests {
                 Action::Check
             };
 
-            state.apply_action(state.to_act, action);
+            let actor = state.to_act;
+            apply_action(&mut state, actor, action);
         }
 
         // Should reach showdown with 5 board cards
@@ -108,24 +130,25 @@ mod state_machine_tests {
     #[test]
     fn test_fold_ends_hand() {
         use terminal_poker::game::actions::Action;
-        use terminal_poker::game::state::{GamePhase, GameState, Player};
+        use terminal_poker::game::state::{GamePhase, GameState};
 
         let mut state = GameState::new(100);
 
         // First player folds
-        state.apply_action(state.to_act, Action::Fold);
+        let actor = state.to_act;
+        apply_action(&mut state, actor, Action::Fold);
 
         assert_eq!(state.phase, GamePhase::HandComplete);
     }
 
     #[test]
     fn test_pot_odds_calculation() {
-        use terminal_poker::game::state::{GameState, Player};
+        use terminal_poker::game::state::GameState;
 
-        let mut state = GameState::new(100);
+        let state = GameState::new(100);
 
         // After blinds are posted, there should be pot odds to calculate
-        if let Some((ratio, equity_needed)) = state.pot_odds() {
+        if let Some((ratio, equity_needed)) = state.pot_odds(local_seat()) {
             assert!(ratio > 1.0);
             assert!(equity_needed > 0.0);
             assert!(equity_needed < 1.0);
@@ -134,7 +157,7 @@ mod state_machine_tests {
 
     #[test]
     fn test_button_alternates() {
-        use terminal_poker::game::state::{GameState, Player};
+        use terminal_poker::game::state::GameState;
 
         let mut state = GameState::new(100);
         let first_button = state.button;
@@ -211,13 +234,14 @@ mod hand_eval_tests {
 // Test bot behavior
 #[cfg(test)]
 mod bot_tests {
+    use super::bot_seat;
     use terminal_poker::bot::rule_based::RuleBasedBot;
     use terminal_poker::game::actions::Action;
     use terminal_poker::game::state::GameState;
 
     #[test]
     fn test_bot_always_returns_valid_action() {
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         let state = GameState::new(100);
 
         // Run 100 times to account for randomness
@@ -237,7 +261,7 @@ mod bot_tests {
 
     #[test]
     fn test_passive_bot() {
-        let bot = RuleBasedBot::new(0.0);
+        let bot = RuleBasedBot::new(0.0, bot_seat());
         let state = GameState::new(100);
 
         let mut aggressive_actions = 0;
@@ -260,8 +284,9 @@ mod bot_tests {
 // Regression tests for betting logic bugs
 #[cfg(test)]
 mod betting_logic_tests {
+    use super::apply_action;
     use terminal_poker::game::actions::Action;
-    use terminal_poker::game::state::{GamePhase, GameState, Player, BIG_BLIND};
+    use terminal_poker::game::state::{GamePhase, GameState};
 
     /// Tests that last_raise_size is correctly calculated after a bet.
     /// Regression test for bug where last_raise_size was calculated AFTER
@@ -279,14 +304,15 @@ mod betting_logic_tests {
             } else {
                 Action::Check
             };
-            state.apply_action(state.to_act, action);
+            let actor = state.to_act;
+            apply_action(&mut state, actor, action);
         }
 
         assert_eq!(state.phase, GamePhase::Flop);
 
         // Now on the flop, first to act makes a bet of 10
         let actor = state.to_act;
-        state.apply_action(actor, Action::Bet(10));
+        apply_action(&mut state, actor, Action::Bet(10));
 
         // last_raise_size should be 10 (the bet amount minus old max of 0)
         assert_eq!(
@@ -308,19 +334,20 @@ mod betting_logic_tests {
             } else {
                 Action::Check
             };
-            state.apply_action(state.to_act, action);
+            let actor = state.to_act;
+            apply_action(&mut state, actor, action);
         }
 
         assert_eq!(state.phase, GamePhase::Flop);
 
         // First player bets 10
         let first_actor = state.to_act;
-        state.apply_action(first_actor, Action::Bet(10));
+        apply_action(&mut state, first_actor, Action::Bet(10));
         assert_eq!(state.last_raise_size, 10);
 
         // Second player raises to 30 (a raise of 20)
         let second_actor = state.to_act;
-        state.apply_action(second_actor, Action::Raise(30));
+        apply_action(&mut state, second_actor, Action::Raise(30));
 
         // last_raise_size should be 20 (30 - 10)
         assert_eq!(
@@ -343,14 +370,17 @@ mod betting_logic_tests {
             } else {
                 Action::Check
             };
-            state.apply_action(state.to_act, action);
+            let actor = state.to_act;
+            apply_action(&mut state, actor, action);
         }
 
         // First player bets 10
-        state.apply_action(state.to_act, Action::Bet(10));
+        let actor = state.to_act;
+        apply_action(&mut state, actor, Action::Bet(10));
 
         // Second player raises to 30 (raise of 20)
-        state.apply_action(state.to_act, Action::Raise(30));
+        let actor = state.to_act;
+        apply_action(&mut state, actor, Action::Raise(30));
 
         // Now first player faces a raise, min re-raise should be 30 + 20 = 50
         let available = state.available_actions();
@@ -374,21 +404,20 @@ mod betting_logic_tests {
             } else {
                 Action::Check
             };
-            state.apply_action(state.to_act, action);
+            let actor = state.to_act;
+            apply_action(&mut state, actor, action);
         }
 
         // First player bets 10
-        state.apply_action(state.to_act, Action::Bet(10));
+        let actor = state.to_act;
+        apply_action(&mut state, actor, Action::Bet(10));
 
         // Second player goes all-in (stack was ~97 after blinds, now betting street)
         let actor = state.to_act;
-        let allin_amount = match actor {
-            Player::Human => state.player_bet + state.player_stack,
-            Player::Bot => state.bot_bet + state.bot_stack,
-        };
+        let allin_amount = state.street_bet(actor) + state.stack(actor);
 
         let old_max = 10; // The bet from first player
-        state.apply_action(actor, Action::AllIn(allin_amount));
+        apply_action(&mut state, actor, Action::AllIn(allin_amount));
 
         // last_raise_size should be allin_amount - old_max
         let expected_raise_size = allin_amount - old_max;
@@ -403,8 +432,9 @@ mod betting_logic_tests {
 // Regression tests for split pot logic
 #[cfg(test)]
 mod split_pot_tests {
+    use super::{bot_seat, local_seat};
     use terminal_poker::game::deck::{Card, Rank, Suit};
-    use terminal_poker::game::state::{GameState, Player};
+    use terminal_poker::game::state::GameState;
 
     /// Tests that odd chip in split pot goes to the out-of-position player.
     /// This is the player who is NOT the button (acts first postflop).
@@ -415,22 +445,19 @@ mod split_pot_tests {
 
         let mut state = GameState::new(100);
 
-        // Record initial stacks
-        let initial_player = state.player_stack;
-        let initial_bot = state.bot_stack;
-
-        // Create a situation: both put in equal amounts, pot is odd
-        // Simulate by directly manipulating state (white-box testing)
+        // Create an odd pot with no outstanding street contribution.
         state.pot = 101; // Odd pot
-        state.player_stack = initial_player - 50;
-        state.bot_stack = initial_bot - 51;
+        state.seat_mut(local_seat()).stack = 100;
+        state.seat_mut(local_seat()).street_bet = 0;
+        state.seat_mut(bot_seat()).stack = 100;
+        state.seat_mut(bot_seat()).street_bet = 0;
 
         // Force specific hands that will tie (same cards different suits)
-        state.player_cards = vec![
+        state.seat_mut(local_seat()).hole_cards = vec![
             Card::new(Rank::Ace, Suit::Spades),
             Card::new(Rank::King, Suit::Spades),
         ];
-        state.bot_cards = vec![
+        state.seat_mut(bot_seat()).hole_cards = vec![
             Card::new(Rank::Ace, Suit::Hearts),
             Card::new(Rank::King, Suit::Hearts),
         ];
@@ -444,22 +471,14 @@ mod split_pot_tests {
             Card::new(Rank::Five, Suit::Hearts),
         ];
 
-        // Now check that after a showdown with identical hands:
-        // The out-of-position player (non-button) gets the odd chip
+        // Resolve the river. In the initial hand the local seat is the button,
+        // so the bot is first clockwise from the button and receives the odd chip.
+        state.phase = terminal_poker::game::state::GamePhase::River;
+        state.advance_phase();
 
-        // For this test, we verify the implementation logic:
-        // pot = 101, half = 50, remainder = 1
-        let pot = 101u32;
-        let half = pot / 2; // 50
-        let remainder = pot % 2; // 1
-
-        assert_eq!(half, 50);
-        assert_eq!(remainder, 1);
-
-        // The out-of-position player should get half + remainder = 51
-        // The button player should get half = 50
-        // This verifies our fix is mathematically correct
-        assert_eq!(half + remainder, 51, "Out-of-position player should get 51");
-        assert_eq!(half, 50, "Button player should get 50");
+        assert_eq!(state.stack(local_seat()), 150);
+        assert_eq!(state.stack(bot_seat()), 151);
+        assert_eq!(state.pot, 0);
+        assert_eq!(state.showdown_result.as_ref().unwrap().winner, None);
     }
 }

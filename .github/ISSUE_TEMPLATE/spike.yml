@@ -1,0 +1,51 @@
+name: Technical or product spike
+description: Time-boxed uncertainty reduction with a required decision or evidence outcome
+title: "[SPIKE] "
+labels:
+  - "type:spike"
+body:
+  - type: textarea
+    id: uncertainty
+    attributes:
+      label: Uncertainty to reduce
+    validations:
+      required: true
+  - type: textarea
+    id: questions
+    attributes:
+      label: Questions to answer
+      placeholder: |
+        - Question one
+        - Question two
+    validations:
+      required: true
+  - type: dropdown
+    id: timebox
+    attributes:
+      label: Time box
+      options:
+        - 1 point
+        - 2 points
+        - 3 points
+        - 5 points maximum
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Required output
+      description: A decision, benchmark, prototype, executable example, or rejected approach.
+    validations:
+      required: true
+  - type: textarea
+    id: stop
+    attributes:
+      label: Stop conditions
+      description: Define when enough evidence has been gathered.
+    validations:
+      required: true
+  - type: textarea
+    id: followup
+    attributes:
+      label: Expected follow-up
+      description: Stories or decisions likely to follow; production implementation is not implicit.

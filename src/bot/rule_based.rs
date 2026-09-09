@@ -1,7 +1,8 @@
 use crate::game::actions::Action;
 use crate::game::deck::{Card, Suit};
 use crate::game::hand::evaluate_hand;
-use crate::game::state::{GamePhase, GameState, Player, BIG_BLIND};
+use crate::game::seat::SeatId;
+use crate::game::state::{GamePhase, GameState, BIG_BLIND};
 
 use super::draws::detect_draws;
 use super::preflop::preflop_strength;
@@ -34,12 +35,14 @@ impl BetSize {
 
 pub struct RuleBasedBot {
     pub aggression: f64,
+    seat: SeatId,
 }
 
 impl RuleBasedBot {
-    pub fn new(aggression: f64) -> Self {
+    pub fn new(aggression: f64, seat: SeatId) -> Self {
         Self {
             aggression: aggression.clamp(0.0, 1.0),
+            seat,
         }
     }
 
@@ -55,11 +58,11 @@ impl RuleBasedBot {
     // ── Preflop ─────────────────────────────────────────────
 
     fn decide_preflop(&self, state: &GameState) -> Action {
-        let strength = preflop_strength(&state.bot_cards);
-        let to_call = state.amount_to_call(Player::Bot);
+        let strength = preflop_strength(state.hole_cards(self.seat));
+        let to_call = state.amount_to_call(self.seat);
         let available = state.available_actions();
-        let stack = state.bot_stack;
-        let bot_bet = state.bot_bet;
+        let stack = state.stack(self.seat);
+        let bot_bet = state.street_bet(self.seat);
         let max_bet = bot_bet + stack;
 
         let mut rng = rand::thread_rng();
@@ -101,7 +104,7 @@ impl RuleBasedBot {
         // Facing a raise
         if adjusted > 0.80 {
             if let Some(min_raise) = available.min_raise {
-                let raise_to = ((state.player_bet as f64) * 3.0) as u32;
+                let raise_to = ((state.max_bet() as f64) * 3.0) as u32;
                 let raise_to = raise_to.max(min_raise);
                 if raise_to >= max_bet {
                     return Action::AllIn(max_bet);
@@ -112,12 +115,13 @@ impl RuleBasedBot {
         }
 
         if adjusted > 0.65 {
-            if available.min_raise.is_some() && self.aggression > 0.5 && rng.gen_bool(0.25) {
-                let min_raise = available.min_raise.unwrap();
-                let raise_to = ((state.player_bet as f64) * 2.5) as u32;
-                let raise_to = raise_to.max(min_raise);
-                if raise_to < max_bet {
-                    return Action::Raise(raise_to);
+            if let Some(min_raise) = available.min_raise {
+                if self.aggression > 0.5 && rng.gen_bool(0.25) {
+                    let raise_to = ((state.max_bet() as f64) * 2.5) as u32;
+                    let raise_to = raise_to.max(min_raise);
+                    if raise_to < max_bet {
+                        return Action::Raise(raise_to);
+                    }
                 }
             }
             return self.make_call(to_call, stack, bot_bet);
@@ -145,12 +149,12 @@ impl RuleBasedBot {
 
     fn preflop_raise(&self, bb_multiplier: f64, state: &GameState) -> Action {
         let available = state.available_actions();
-        let stack = state.bot_stack;
-        let bot_bet = state.bot_bet;
+        let stack = state.stack(self.seat);
+        let bot_bet = state.street_bet(self.seat);
         let max_bet = bot_bet + stack;
         let raise_to = (BIG_BLIND as f64 * bb_multiplier) as u32;
 
-        if state.amount_to_call(Player::Bot) == 0 {
+        if state.amount_to_call(self.seat) == 0 {
             // BB option — emit Bet (raise over posted blind)
             let min = available.min_bet.unwrap_or(BIG_BLIND);
             let amount = raise_to.max(min);
@@ -174,18 +178,18 @@ impl RuleBasedBot {
     // ── Postflop (Flop / Turn) ──────────────────────────────
 
     fn decide_postflop(&self, state: &GameState) -> Action {
-        let made = evaluate_hand(&state.bot_cards, &state.board).strength();
+        let made = evaluate_hand(state.hole_cards(self.seat), &state.board).strength();
         let street_factor = match state.phase {
             GamePhase::Flop => 1.0,
             GamePhase::Turn => 0.5,
             _ => 0.0,
         };
-        let draws = detect_draws(&state.bot_cards, &state.board);
+        let draws = detect_draws(state.hole_cards(self.seat), &state.board);
         let draw_boost = draws.equity_boost(street_factor);
         let effective = made + draw_boost;
         let adjusted = self.adjust_strength(effective, state);
         let texture = analyze_board_texture(&state.board);
-        let to_call = state.amount_to_call(Player::Bot);
+        let to_call = state.amount_to_call(self.seat);
 
         if to_call == 0 {
             self.postflop_bet_or_check(adjusted, texture, state)
@@ -233,9 +237,9 @@ impl RuleBasedBot {
     // ── River ───────────────────────────────────────────────
 
     fn decide_river(&self, state: &GameState) -> Action {
-        let made = evaluate_hand(&state.bot_cards, &state.board).strength();
+        let made = evaluate_hand(state.hole_cards(self.seat), &state.board).strength();
         let adjusted = self.adjust_strength(made, state);
-        let to_call = state.amount_to_call(Player::Bot);
+        let to_call = state.amount_to_call(self.seat);
 
         if to_call == 0 {
             self.river_bet_or_check(adjusted, state)
@@ -263,8 +267,8 @@ impl RuleBasedBot {
 
     fn postflop_facing_bet(&self, adjusted: f64, to_call: u32, state: &GameState) -> Action {
         let available = state.available_actions();
-        let stack = state.bot_stack;
-        let bot_bet = state.bot_bet;
+        let stack = state.stack(self.seat);
+        let bot_bet = state.street_bet(self.seat);
         let max_bet = bot_bet + stack;
         let mut rng = rand::thread_rng();
 
@@ -280,11 +284,12 @@ impl RuleBasedBot {
         }
 
         if adjusted > 0.20 {
-            if available.min_raise.is_some() && self.aggression > 0.5 && rng.gen_bool(0.30) {
-                let min_raise = available.min_raise.unwrap();
-                let raise_to = self.calculate_raise_size(min_raise, state.pot, stack, bot_bet);
-                if raise_to < max_bet {
-                    return Action::Raise(raise_to);
+            if let Some(min_raise) = available.min_raise {
+                if self.aggression > 0.5 && rng.gen_bool(0.30) {
+                    let raise_to = self.calculate_raise_size(min_raise, state.pot, stack, bot_bet);
+                    if raise_to < max_bet {
+                        return Action::Raise(raise_to);
+                    }
                 }
             }
             return self.make_call(to_call, stack, bot_bet);
@@ -311,7 +316,7 @@ impl RuleBasedBot {
     fn adjust_strength(&self, effective: f64, state: &GameState) -> f64 {
         let mut rng = rand::thread_rng();
         let noise: f64 = rng.gen_range(-0.05..0.05);
-        let position = if state.button == Player::Bot {
+        let position = if state.button == self.seat {
             0.06 // In position postflop (button acts last)
         } else {
             -0.04 // Out of position
@@ -322,8 +327,8 @@ impl RuleBasedBot {
 
     fn make_bet(&self, size: BetSize, state: &GameState) -> Action {
         let available = state.available_actions();
-        let stack = state.bot_stack;
-        let bot_bet = state.bot_bet;
+        let stack = state.stack(self.seat);
+        let bot_bet = state.street_bet(self.seat);
         let max_bet = bot_bet + stack;
 
         let min_bet = match available.min_bet {
@@ -409,18 +414,26 @@ mod tests {
     use super::*;
     use crate::game::deck::{Card, Rank, Suit};
 
+    fn local_seat() -> SeatId {
+        SeatId::new(0).unwrap()
+    }
+
+    fn bot_seat() -> SeatId {
+        SeatId::new(1).unwrap()
+    }
+
     #[test]
     fn test_bot_creation() {
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         assert!((bot.aggression - 0.5).abs() < f64::EPSILON);
     }
 
     #[test]
     fn test_aggression_clamping() {
-        let bot = RuleBasedBot::new(1.5);
+        let bot = RuleBasedBot::new(1.5, bot_seat());
         assert!((bot.aggression - 1.0).abs() < f64::EPSILON);
 
-        let bot = RuleBasedBot::new(-0.5);
+        let bot = RuleBasedBot::new(-0.5, bot_seat());
         assert!(bot.aggression.abs() < f64::EPSILON);
     }
 
@@ -472,16 +485,16 @@ mod tests {
     ) -> GameState {
         let mut state = GameState::new(100);
         state.phase = phase;
-        state.bot_cards = bot_cards;
+        state.seat_mut(bot_seat()).hole_cards = bot_cards;
         state.board = board;
         state.pot = pot;
-        state.player_bet = player_bet;
-        state.bot_bet = 0;
-        state.to_act = Player::Bot;
-        state.button = if bot_is_ip { Player::Bot } else { Player::Human };
-        state.bot_stack = 180;
-        state.player_stack = 180;
-        state.last_aggressor = Some(Player::Human);
+        state.seat_mut(local_seat()).street_bet = player_bet;
+        state.seat_mut(bot_seat()).street_bet = 0;
+        state.to_act = bot_seat();
+        state.button = if bot_is_ip { bot_seat() } else { local_seat() };
+        state.seat_mut(bot_seat()).stack = 180;
+        state.seat_mut(local_seat()).stack = 180;
+        state.last_aggressor = Some(local_seat());
         state.last_raise_size = player_bet;
         state
     }
@@ -490,7 +503,7 @@ mod tests {
     fn test_trips_facing_bet_never_folds() {
         // Trip Kings: made strength ≈ 0.47, adjusted OOP ≈ 0.43 ± 0.05
         // Even worst case 0.38 >> fold threshold (0.12)
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         let bot_cards = vec![
             Card::new(Rank::King, Suit::Spades),
             Card::new(Rank::King, Suit::Hearts),
@@ -520,7 +533,7 @@ mod tests {
     fn test_air_oop_facing_bet_folds() {
         // 7♠ 2♥ on K♦ Q♣ 4♠ 9♥ — high card, no draws (rainbow, disconnected)
         // strength ≈ 0.092, adjusted OOP ≈ 0.052 ± 0.05, max 0.102 < 0.12
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         let bot_cards = vec![
             Card::new(Rank::Seven, Suit::Spades),
             Card::new(Rank::Two, Suit::Hearts),
@@ -550,7 +563,7 @@ mod tests {
     fn test_top_pair_facing_bet_calls() {
         // K♠ 7♥ on K♦ 5♣ 2♠ 9♥ — top pair
         // strength ≈ 0.22, adjusted IP ≈ 0.28 ± 0.05, min 0.23 > 0.12
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         let bot_cards = vec![
             Card::new(Rank::King, Suit::Spades),
             Card::new(Rank::Seven, Suit::Hearts),
@@ -580,7 +593,7 @@ mod tests {
     fn test_flush_draw_on_flop_calls() {
         // 8♥ 9♥ on 2♥ 5♥ K♠ — flush draw
         // effective ≈ 0.09 + 0.18 = 0.27, adjusted IP ≈ 0.33 ± 0.05, min 0.28 > 0.12
-        let bot = RuleBasedBot::new(0.5);
+        let bot = RuleBasedBot::new(0.5, bot_seat());
         let bot_cards = vec![
             Card::new(Rank::Eight, Suit::Hearts),
             Card::new(Rank::Nine, Suit::Hearts),

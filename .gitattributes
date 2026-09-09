@@ -1,0 +1,11 @@
+# Keep source and shell scripts portable across Windows, macOS and Linux.
+* text=auto
+*.rs text eol=lf
+*.sh text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.png binary
+*.gif binary
+*.der binary
+*.pdf binary

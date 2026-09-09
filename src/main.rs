@@ -1,8 +1,3 @@
-mod bot;
-mod game;
-mod stats;
-mod ui;
-
 use std::io;
 
 use clap::Parser;
@@ -13,9 +8,14 @@ use crossterm::{
 };
 use ratatui::{backend::CrosstermBackend, Terminal};
 
-use game::state::GamePhase;
-use stats::persistence::StatsStore;
-use ui::app::App;
+use terminal_poker::{
+    game::state::GamePhase,
+    stats::persistence::StatsStore,
+    ui::{
+        self,
+        app::{App, BOT_SEAT, LOCAL_SEAT},
+    },
+};
 
 #[derive(Parser, Debug)]
 #[command(name = "terminal-poker")]
@@ -32,7 +32,9 @@ struct Args {
 }
 
 fn parse_aggression(s: &str) -> Result<f64, String> {
-    let val: f64 = s.parse().map_err(|_| format!("'{s}' is not a valid number"))?;
+    let val: f64 = s
+        .parse()
+        .map_err(|_| format!("'{s}' is not a valid number"))?;
     if (0.0..=1.0).contains(&val) {
         Ok(val)
     } else {
@@ -106,35 +108,31 @@ fn run_game_loop(
         if event::poll(std::time::Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 // Ctrl+C quits from any phase
-                if key.modifiers.contains(KeyModifiers::CONTROL)
-                    && key.code == KeyCode::Char('c')
-                {
+                if key.modifiers.contains(KeyModifiers::CONTROL) && key.code == KeyCode::Char('c') {
                     // Record stats unless already recorded (Summary is entered
                     // after 'q' which already calls these)
                     if !matches!(app.game_state.phase, GamePhase::Summary) {
                         stats_store.record_session_end();
                         stats_store.record_profit(
-                            (app.game_state.session_profit_bb() * 2.0).round() as i64,
+                            (app.game_state.session_profit_bb(LOCAL_SEAT) * 2.0).round() as i64,
                         );
                     }
                     break;
                 }
 
                 match app.game_state.phase {
-                    GamePhase::Showdown => {
-                        match key.code {
-                            KeyCode::Char('q') | KeyCode::Char('Q') => {
-                                stats_store.record_session_end();
-                                stats_store.record_profit(
-                                    (app.game_state.session_profit_bb() * 2.0).round() as i64,
-                                );
-                                app.game_state.phase = GamePhase::Summary;
-                            }
-                            _ => {
-                                app.continue_after_showdown(stats_store);
-                            }
+                    GamePhase::Showdown => match key.code {
+                        KeyCode::Char('q') | KeyCode::Char('Q') => {
+                            stats_store.record_session_end();
+                            stats_store.record_profit(
+                                (app.game_state.session_profit_bb(LOCAL_SEAT) * 2.0).round() as i64,
+                            );
+                            app.game_state.phase = GamePhase::Summary;
                         }
-                    }
+                        _ => {
+                            app.continue_after_showdown(stats_store);
+                        }
+                    },
                     GamePhase::Summary | GamePhase::SessionEnd => match key.code {
                         KeyCode::Char('q') | KeyCode::Char('Q') => break,
                         KeyCode::Char('n') | KeyCode::Char('N') => {
@@ -153,7 +151,8 @@ fn run_game_loop(
                             KeyCode::Char('q') | KeyCode::Char('Q') => {
                                 stats_store.record_session_end();
                                 stats_store.record_profit(
-                                    (app.game_state.session_profit_bb() * 2.0).round() as i64,
+                                    (app.game_state.session_profit_bb(LOCAL_SEAT) * 2.0).round()
+                                        as i64,
                                 );
                                 app.game_state.phase = GamePhase::Summary;
                             }
@@ -183,10 +182,10 @@ fn run_game_loop(
         }
 
         // Check for session end after a fold resolves (showdown path handled by continue_after_showdown)
-        if app.game_state.phase == GamePhase::HandComplete {
-            if app.game_state.player_stack == 0 || app.game_state.bot_stack == 0 {
-                app.game_state.phase = GamePhase::SessionEnd;
-            }
+        if app.game_state.phase == GamePhase::HandComplete
+            && (app.game_state.stack(LOCAL_SEAT) == 0 || app.game_state.stack(BOT_SEAT) == 0)
+        {
+            app.game_state.phase = GamePhase::SessionEnd;
         }
     }
 

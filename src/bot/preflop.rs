@@ -263,22 +263,10 @@ mod tests {
         let fives = preflop_strength(&pair(Rank::Five));
         let seven_two = preflop_strength(&offsuit(Rank::Seven, Rank::Two));
 
-        assert!(
-            aa > aks,
-            "AA ({aa}) should beat AKs ({aks})"
-        );
-        assert!(
-            aks > jj,
-            "AKs ({aks}) should beat JJ ({jj})"
-        );
-        assert!(
-            jj > nn,
-            "JJ ({jj}) should beat 99 ({nn})"
-        );
-        assert!(
-            nn > fives,
-            "99 ({nn}) should beat 55 ({fives})"
-        );
+        assert!(aa > aks, "AA ({aa}) should beat AKs ({aks})");
+        assert!(aks > jj, "AKs ({aks}) should beat JJ ({jj})");
+        assert!(jj > nn, "JJ ({jj}) should beat 99 ({nn})");
+        assert!(nn > fives, "99 ({nn}) should beat 55 ({fives})");
         assert!(
             fives > seven_two,
             "55 ({fives}) should beat 72o ({seven_two})"
@@ -295,13 +283,34 @@ mod tests {
     fn test_fixed_matrix_entries() {
         // These hands had lookup table errors that were corrected.
         // Verify they match the canonical matrix.
-        assert_eq!(classify_preflop(&suited(Rank::Jack, Rank::Eight)), PreflopTier::Marginal);   // J8s
-        assert_eq!(classify_preflop(&suited(Rank::Jack, Rank::Seven)), PreflopTier::Trash);      // J7s
-        assert_eq!(classify_preflop(&suited(Rank::Ten, Rank::Seven)), PreflopTier::Marginal);    // T7s
-        assert_eq!(classify_preflop(&suited(Rank::Ten, Rank::Six)), PreflopTier::Trash);         // T6s
-        assert_eq!(classify_preflop(&suited(Rank::Nine, Rank::Six)), PreflopTier::Marginal);     // 96s
-        assert_eq!(classify_preflop(&suited(Rank::Eight, Rank::Five)), PreflopTier::Marginal);   // 85s
-        assert_eq!(classify_preflop(&offsuit(Rank::King, Rank::Ten)), PreflopTier::Marginal);    // KTo
+        assert_eq!(
+            classify_preflop(&suited(Rank::Jack, Rank::Eight)),
+            PreflopTier::Marginal
+        ); // J8s
+        assert_eq!(
+            classify_preflop(&suited(Rank::Jack, Rank::Seven)),
+            PreflopTier::Trash
+        ); // J7s
+        assert_eq!(
+            classify_preflop(&suited(Rank::Ten, Rank::Seven)),
+            PreflopTier::Marginal
+        ); // T7s
+        assert_eq!(
+            classify_preflop(&suited(Rank::Ten, Rank::Six)),
+            PreflopTier::Trash
+        ); // T6s
+        assert_eq!(
+            classify_preflop(&suited(Rank::Nine, Rank::Six)),
+            PreflopTier::Marginal
+        ); // 96s
+        assert_eq!(
+            classify_preflop(&suited(Rank::Eight, Rank::Five)),
+            PreflopTier::Marginal
+        ); // 85s
+        assert_eq!(
+            classify_preflop(&offsuit(Rank::King, Rank::Ten)),
+            PreflopTier::Marginal
+        ); // KTo
     }
 
     #[test]

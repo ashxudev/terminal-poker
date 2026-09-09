@@ -1,4 +1,27 @@
+pub mod authorized_table;
+pub mod authorized_table_review;
 pub mod bot;
+pub mod credentials;
 pub mod game;
+pub mod lobby;
+pub mod local_practice;
+pub mod local_profile;
+pub mod network_client;
+pub mod network_client_review;
+pub mod network_server;
+pub mod network_session;
+pub mod network_transport;
+pub mod protocol;
+pub mod protocol_review;
+pub mod ring_history;
 pub mod stats;
+pub mod table_actor;
+pub mod table_actor_review;
+pub mod table_registry;
+pub mod tournament;
+pub mod training;
 pub mod ui;
+
+pub mod admission;
+pub mod game_invite;
+pub mod game_stream;
