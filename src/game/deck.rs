@@ -1,5 +1,5 @@
 use rand::seq::SliceRandom;
-use rand::thread_rng;
+use rand::{rngs::StdRng, Rng, SeedableRng};
 use serde::{Deserialize, Serialize};
 use std::fmt;
 
@@ -15,7 +15,7 @@ impl Suit {
     pub fn symbol(&self) -> &'static str {
         match self {
             Suit::Spades => "♠\u{FE0E}",
-            Suit::Hearts => "❤\u{FE0E}",
+            Suit::Hearts => "♥\u{FE0E}",
             Suit::Diamonds => "♦\u{FE0E}",
             Suit::Clubs => "♣\u{FE0E}",
         }
@@ -97,7 +97,7 @@ impl fmt::Display for Card {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Deck {
     cards: Vec<Card>,
     index: usize,
@@ -114,9 +114,8 @@ impl Deck {
         Self { cards, index: 0 }
     }
 
-    pub fn shuffle(&mut self) {
-        let mut rng = thread_rng();
-        self.cards.shuffle(&mut rng);
+    pub fn shuffle_with<R: Rng + ?Sized>(&mut self, rng: &mut R) {
+        self.cards.shuffle(rng);
         self.index = 0;
     }
 
@@ -132,6 +131,44 @@ impl Deck {
 
     pub fn deal_n(&mut self, n: usize) -> Vec<Card> {
         (0..n).filter_map(|_| self.deal()).collect()
+    }
+
+    /// Constructs a deck from an already validated deal order.
+    ///
+    /// This is crate-private so production callers cannot replace the
+    /// authoritative entropy source. The training module validates card count
+    /// and uniqueness before crossing this boundary.
+    pub(crate) fn from_ordered_cards_for_training(cards: Vec<Card>) -> Self {
+        debug_assert_eq!(cards.len(), 52);
+        Self { cards, index: 0 }
+    }
+}
+
+/// Authoritative shuffle boundary.
+///
+/// Production construction seeds from operating-system-backed entropy. The
+/// deterministic constructor exists for tests and review fixtures only; the
+/// seed is intentionally not retained or exposed.
+#[derive(Debug, Clone)]
+pub struct ShuffleSource {
+    rng: StdRng,
+}
+
+impl ShuffleSource {
+    pub fn production() -> Self {
+        Self {
+            rng: StdRng::from_entropy(),
+        }
+    }
+
+    pub fn deterministic_for_review(seed: u64) -> Self {
+        Self {
+            rng: StdRng::seed_from_u64(seed),
+        }
+    }
+
+    pub fn shuffle(&mut self, deck: &mut Deck) {
+        deck.shuffle_with(&mut self.rng);
     }
 }
 
@@ -158,8 +195,29 @@ mod tests {
         let mut deck = Deck::new();
         deck.deal();
         deck.deal();
-        deck.shuffle();
+        let mut source = ShuffleSource::deterministic_for_review(7);
+        source.shuffle(&mut deck);
         let cards: Vec<_> = (0..52).filter_map(|_| deck.deal()).collect();
         assert_eq!(cards.len(), 52);
+    }
+
+    #[test]
+    fn same_review_seed_produces_same_deck_order() {
+        let mut first = Deck::new();
+        let mut second = Deck::new();
+        ShuffleSource::deterministic_for_review(42).shuffle(&mut first);
+        ShuffleSource::deterministic_for_review(42).shuffle(&mut second);
+
+        assert_eq!(first, second);
+    }
+
+    #[test]
+    fn different_review_seeds_produce_different_deck_orders() {
+        let mut first = Deck::new();
+        let mut second = Deck::new();
+        ShuffleSource::deterministic_for_review(42).shuffle(&mut first);
+        ShuffleSource::deterministic_for_review(43).shuffle(&mut second);
+
+        assert_ne!(first, second);
     }
 }

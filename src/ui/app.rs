@@ -3,8 +3,11 @@ use std::time::{Duration, Instant};
 
 use crate::bot::rule_based::RuleBasedBot;
 use crate::game::actions::Action;
-use crate::game::state::{GamePhase, GameState, Player, BIG_BLIND, SMALL_BLIND};
+use crate::game::command::SeatCommand;
+use crate::game::seat::SeatId;
+use crate::game::state::{GamePhase, GameState, BIG_BLIND, SMALL_BLIND};
 use crate::stats::persistence::StatsStore;
+use crate::ui::multiway_review::MultiwayReviewView;
 
 const DELAY_BOT_ACTION_MS: u64 = 2500;
 const DELAY_BOT_ACTION_AFTER_REVEAL_MS: u64 = 3500;
@@ -16,6 +19,15 @@ const DELAY_SHOWDOWN_RESULT_MS: u64 = 1000;
 const DELAY_POST_SB_MS: u64 = 500;
 const DELAY_POST_BB_MS: u64 = 800;
 const DELAY_ALLIN_RUNOUT_MS: u64 = 1200;
+
+pub const LOCAL_SEAT: SeatId = match SeatId::new(0) {
+    Ok(seat) => seat,
+    Err(_) => panic!("offline local seat must be valid"),
+};
+pub const BOT_SEAT: SeatId = match SeatId::new(1) {
+    Ok(seat) => seat,
+    Err(_) => panic!("offline bot seat must be valid"),
+};
 
 #[derive(Debug, Clone)]
 pub enum GameEvent {
@@ -36,6 +48,9 @@ pub struct ActionLogEntry {
 
 pub struct App {
     pub game_state: GameState,
+    /// Read-only deterministic multiway presentation used by the real renderer
+    /// for product review evidence. Production offline play leaves this `None`.
+    pub multiway_review: Option<MultiwayReviewView>,
     pub bot: RuleBasedBot,
     pub show_help: bool,
     pub show_stats: bool,
@@ -71,7 +86,8 @@ impl App {
         let initial_phase = game_state.phase;
         Self {
             game_state,
-            bot: RuleBasedBot::new(aggression),
+            multiway_review: None,
+            bot: RuleBasedBot::new(aggression, BOT_SEAT),
             show_help: false,
             show_stats: false,
             raise_input: String::new(),
@@ -166,7 +182,13 @@ impl App {
     }
 
     pub fn apply_player_action(&mut self, action: Action, stats: &mut StatsStore) {
-        if !self.game_state.is_player_turn() {
+        if !self.game_state.is_turn(LOCAL_SEAT) {
+            return;
+        }
+
+        let command = SeatCommand::new(LOCAL_SEAT, action);
+        if let Err(error) = self.game_state.validate_command(command) {
+            self.message = Some(format!("Action rejected: {error}"));
             return;
         }
 
@@ -182,8 +204,8 @@ impl App {
         // Must run BEFORE player_raised_preflop is set below
         if !self.three_bet_opportunity_recorded
             && self.game_state.board.is_empty()
-            && self.game_state.last_aggressor == Some(Player::Bot)
-            && self.game_state.amount_to_call(Player::Human) > 0
+            && self.game_state.last_aggressor == Some(BOT_SEAT)
+            && self.game_state.amount_to_call(LOCAL_SEAT) > 0
             && !self.player_raised_preflop
         {
             self.three_bet_opportunity_recorded = true;
@@ -201,7 +223,7 @@ impl App {
         // C-bet tracking: flop, player was preflop aggressor, no bet yet this street
         if !self.cbet_opportunity_recorded
             && self.game_state.phase == GamePhase::Flop
-            && self.game_state.preflop_aggressor == Some(Player::Human)
+            && self.game_state.preflop_aggressor == Some(LOCAL_SEAT)
             && self.game_state.last_aggressor.is_none()
         {
             self.cbet_opportunity_recorded = true;
@@ -264,13 +286,15 @@ impl App {
         self.raise_input.clear();
         self.player_last_action = Some(action);
 
-        // Snapshot visible state before apply_action (which may advance phase and clear bets/pot)
-        self.visible_player_bet = self.projected_bet(Player::Human, action);
-        self.visible_bot_bet = self.game_state.bot_bet;
+        // Snapshot visible state before the command advances phase and clears bets/pot.
+        self.visible_player_bet = self.projected_bet(LOCAL_SEAT, action);
+        self.visible_bot_bet = self.game_state.street_bet(BOT_SEAT);
 
         let street = Self::phase_name(self.game_state.phase);
         let desc = action.description_for("You");
-        self.game_state.apply_action(Player::Human, action);
+        self.game_state
+            .apply_command(command)
+            .expect("the command was validated against unchanged state");
         self.log_action(street, format!("You {}", desc));
         self.message = Some(format!("You {}", desc));
 
@@ -301,14 +325,14 @@ impl App {
             GamePhase::HandComplete => {
                 // Log the fold result
                 if let Some((player, _)) = self.game_state.last_action {
-                    let winner_text = if player == Player::Bot {
+                    let winner_text = if player == BOT_SEAT {
                         "You win the pot"
                     } else {
                         "Opp wins the pot"
                     };
                     self.log_action("", winner_text.to_string());
                 }
-                if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
+                if self.game_state.stack(LOCAL_SEAT) > 0 && self.game_state.stack(BOT_SEAT) > 0 {
                     self.pending_events.push_back(GameEvent::StartNewHand);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(DELAY_NEW_HAND_MS));
@@ -316,8 +340,7 @@ impl App {
                 // else: session over, main loop detects busted stacks on HandComplete
             }
             GamePhase::Showdown => {
-                self.pending_events
-                    .push_back(GameEvent::RevealShowdown);
+                self.pending_events.push_back(GameEvent::RevealShowdown);
                 self.next_event_at =
                     Some(Instant::now() + Duration::from_millis(DELAY_SHOWDOWN_REVEAL_MS));
             }
@@ -327,21 +350,20 @@ impl App {
             _ => {
                 if phase_changed && self.visible_board_len < self.game_state.board.len() {
                     // Street transition delay
-                    let reveal_delay =
-                        if self.game_state.player_stack == 0 || self.game_state.bot_stack == 0 {
-                            // All-in runout: consistent pacing between streets
-                            DELAY_ALLIN_RUNOUT_MS
-                        } else if self.game_state.last_action.map(|(p, _)| p) == Some(Player::Bot)
-                        {
-                            // Normal: longer pause after bot's closing action
-                            DELAY_CARD_REVEAL_AFTER_BOT_MS
-                        } else {
-                            DELAY_CARD_REVEAL_MS
-                        };
+                    let reveal_delay = if self.game_state.stack(LOCAL_SEAT) == 0
+                        || self.game_state.stack(BOT_SEAT) == 0
+                    {
+                        // All-in runout: consistent pacing between streets
+                        DELAY_ALLIN_RUNOUT_MS
+                    } else if self.game_state.last_action.map(|(p, _)| p) == Some(BOT_SEAT) {
+                        // Normal: longer pause after bot's closing action
+                        DELAY_CARD_REVEAL_AFTER_BOT_MS
+                    } else {
+                        DELAY_CARD_REVEAL_MS
+                    };
                     self.pending_events.push_back(GameEvent::RevealCards);
-                    self.next_event_at =
-                        Some(Instant::now() + Duration::from_millis(reveal_delay));
-                } else if self.game_state.to_act == Player::Bot {
+                    self.next_event_at = Some(Instant::now() + Duration::from_millis(reveal_delay));
+                } else if self.game_state.to_act == BOT_SEAT {
                     self.pending_events.push_back(GameEvent::BotAction);
                     self.next_event_at =
                         Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_MS));
@@ -378,6 +400,14 @@ impl App {
                 self.bot_thinking = false;
                 let street = Self::phase_name(self.game_state.phase);
                 let bot_action = self.bot.decide(&self.game_state);
+                let command = SeatCommand::new(BOT_SEAT, bot_action);
+                if let Err(error) = self.game_state.validate_command(command) {
+                    let rejection = format!("Opp action rejected: {error}");
+                    self.log_action(street, rejection.clone());
+                    self.message = Some(rejection);
+                    self.next_event_at = None;
+                    return;
+                }
                 self.bot_last_action = Some(bot_action);
 
                 // Detect bot c-bet: flop, bot was preflop aggressor, no bet yet, aggressive action
@@ -387,19 +417,21 @@ impl App {
                     _ => false,
                 };
                 if self.game_state.phase == GamePhase::Flop
-                    && self.game_state.preflop_aggressor == Some(Player::Bot)
+                    && self.game_state.preflop_aggressor == Some(BOT_SEAT)
                     && self.game_state.last_aggressor.is_none()
                     && bot_is_aggressive
                 {
                     self.facing_cbet = true;
                 }
 
-                // Snapshot visible bets before apply_action (which may advance phase and clear bets)
-                self.visible_bot_bet = self.projected_bet(Player::Bot, bot_action);
-                self.visible_player_bet = self.game_state.player_bet;
+                // Snapshot visible bets before the command advances phase and clears bets.
+                self.visible_bot_bet = self.projected_bet(BOT_SEAT, bot_action);
+                self.visible_player_bet = self.game_state.street_bet(LOCAL_SEAT);
 
                 let desc = bot_action.description_for("Opp");
-                self.game_state.apply_action(Player::Bot, bot_action);
+                self.game_state
+                    .apply_command(command)
+                    .expect("the bot command was validated against unchanged state");
                 self.log_action(street, format!("Opp {}", desc));
                 self.message = Some(format!("Opp {}", desc));
             }
@@ -429,26 +461,24 @@ impl App {
                 });
                 self.log_blinds();
                 self.pending_events.push_back(GameEvent::PostSmallBlind);
-                self.next_event_at =
-                    Some(Instant::now() + Duration::from_millis(DELAY_POST_SB_MS));
+                self.next_event_at = Some(Instant::now() + Duration::from_millis(DELAY_POST_SB_MS));
                 return;
             }
             GameEvent::PostSmallBlind => {
                 match self.game_state.button {
-                    Player::Human => self.visible_player_bet = self.game_state.player_bet,
-                    Player::Bot => self.visible_bot_bet = self.game_state.bot_bet,
+                    LOCAL_SEAT => self.visible_player_bet = self.game_state.street_bet(LOCAL_SEAT),
+                    BOT_SEAT => self.visible_bot_bet = self.game_state.street_bet(BOT_SEAT),
+                    _ => unreachable!("offline game has exactly two controller seats"),
                 }
                 self.pending_events.push_back(GameEvent::PostBigBlind);
-                self.next_event_at =
-                    Some(Instant::now() + Duration::from_millis(DELAY_POST_BB_MS));
+                self.next_event_at = Some(Instant::now() + Duration::from_millis(DELAY_POST_BB_MS));
                 return;
             }
-            GameEvent::PostBigBlind => {
-                match self.game_state.button {
-                    Player::Human => self.visible_bot_bet = self.game_state.bot_bet,
-                    Player::Bot => self.visible_player_bet = self.game_state.player_bet,
-                }
-            }
+            GameEvent::PostBigBlind => match self.game_state.button {
+                LOCAL_SEAT => self.visible_bot_bet = self.game_state.street_bet(BOT_SEAT),
+                BOT_SEAT => self.visible_player_bet = self.game_state.street_bet(LOCAL_SEAT),
+                _ => unreachable!("offline game has exactly two controller seats"),
+            },
             GameEvent::RevealCards => {
                 self.visible_board_len = self.game_state.board.len();
                 self.visible_player_bet = 0;
@@ -457,16 +487,18 @@ impl App {
                 self.bot_last_action = None;
 
                 // All-in runout: skip betting and advance to next street
-                if self.game_state.player_stack == 0 || self.game_state.bot_stack == 0 {
+                if self.game_state.stack(LOCAL_SEAT) == 0 || self.game_state.stack(BOT_SEAT) == 0 {
                     self.game_state.advance_phase();
                     // Fall through to enqueue_next_events which queues
                     // the next RevealCards or RevealShowdown
                 } else {
                     // Normal: check if bot should act next
-                    if self.game_state.to_act == Player::Bot {
+                    if self.game_state.to_act == BOT_SEAT {
                         self.pending_events.push_back(GameEvent::BotAction);
-                        self.next_event_at =
-                            Some(Instant::now() + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS));
+                        self.next_event_at = Some(
+                            Instant::now()
+                                + Duration::from_millis(DELAY_BOT_ACTION_AFTER_REVEAL_MS),
+                        );
                         self.bot_thinking = true;
                         self.thinking_start_tick = self.tick_count;
                         return;
@@ -479,11 +511,11 @@ impl App {
                 self.bot_last_action = None;
                 // Record stats
                 if let Some(ref result) = self.game_state.showdown_result {
-                    let won = result.winner == Some(Player::Human);
+                    let won = result.winner == Some(LOCAL_SEAT);
                     stats.record_showdown(won);
                     if won {
                         stats.record_pot_won(result.pot_won);
-                    } else if result.winner == Some(Player::Bot) {
+                    } else if result.winner == Some(BOT_SEAT) {
                         stats.record_pot_lost(result.pot_won);
                     }
                 }
@@ -506,7 +538,7 @@ impl App {
 
     fn log_blinds(&mut self) {
         let sb_bb = SMALL_BLIND as f64 / BIG_BLIND as f64;
-        let (sb_player, bb_player) = if self.game_state.button == Player::Human {
+        let (sb_player, bb_player) = if self.game_state.button == LOCAL_SEAT {
             ("You", "Opp")
         } else {
             ("Opp", "You")
@@ -527,16 +559,10 @@ impl App {
         self.next_event_at = Some(Instant::now() + Duration::from_millis(DELAY_POST_SB_MS));
     }
 
-    /// Compute what a player's bet will be after an action, before apply_action clears it.
-    fn projected_bet(&self, player: Player, action: Action) -> u32 {
-        let current = match player {
-            Player::Human => self.game_state.player_bet,
-            Player::Bot => self.game_state.bot_bet,
-        };
-        let stack = match player {
-            Player::Human => self.game_state.player_stack,
-            Player::Bot => self.game_state.bot_stack,
-        };
+    /// Compute what a player's bet will be before an accepted command clears it.
+    fn projected_bet(&self, seat: SeatId, action: Action) -> u32 {
+        let current = self.game_state.street_bet(seat);
+        let stack = self.game_state.stack(seat);
         match action {
             Action::Fold | Action::Check => current,
             Action::Call(amount) => current + amount.min(stack),
@@ -554,7 +580,7 @@ impl App {
     pub fn continue_after_showdown(&mut self, _stats: &mut StatsStore) {
         if self.game_state.phase == GamePhase::Showdown && self.showdown_result_shown {
             self.pending_events.clear();
-            if self.game_state.player_stack > 0 && self.game_state.bot_stack > 0 {
+            if self.game_state.stack(LOCAL_SEAT) > 0 && self.game_state.stack(BOT_SEAT) > 0 {
                 self.pending_events.push_back(GameEvent::StartNewHand);
                 self.next_event_at = Some(Instant::now()); // immediate — user pressed key
             } else {

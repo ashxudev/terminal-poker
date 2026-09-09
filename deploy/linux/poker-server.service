@@ -1,0 +1,19 @@
+[Unit]
+Description=Sneaky Blinders dedicated poker server
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/sneakyblinders/state
+ExecStart=%h/.local/share/sneakyblinders/current/poker-server --multi-table --bind 192.168.5.250:6969 --tls-cert %h/.local/share/sneakyblinders/tls/server.pem --tls-key %h/.local/share/sneakyblinders/tls/server.key --checkpoint registry.json --history hands.json
+Restart=on-failure
+RestartSec=3
+KillSignal=SIGINT
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=default.target

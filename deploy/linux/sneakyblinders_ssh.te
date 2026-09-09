@@ -1,0 +1,13 @@
+# Optional Fedora 44 workaround, requiring explicit host administrator approval.
+# Does not disable enforcement or permit all unreserved ports.
+module sneakyblinders_ssh 1.0;
+
+require {
+    type sshd_session_t;
+    attribute port_type;
+    class tcp_socket name_connect;
+}
+
+type sneakyblinders_port_t;
+typeattribute sneakyblinders_port_t port_type;
+allow sshd_session_t sneakyblinders_port_t:tcp_socket name_connect;

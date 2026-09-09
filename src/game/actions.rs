@@ -78,11 +78,7 @@ impl Action {
                 if is_you { "raise" } else { "raises" },
                 format_bb(*amt)
             ),
-            Action::AllIn(amt) => format!(
-                "{} for {}",
-                if is_you { "all-in" } else { "all-in" },
-                format_bb(*amt)
-            ),
+            Action::AllIn(amt) => format!("all-in for {}", format_bb(*amt)),
         }
     }
 }

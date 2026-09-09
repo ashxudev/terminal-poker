@@ -25,3 +25,26 @@ CLAUDE.md
 
 # OpenAI Codex
 AGENTS.md
+
+# Local dedicated-server SSH credentials
+/.env
+/.ssh-known-hosts
+
+# Workstation output, build scratch and generated review bundles
+/tmp/
+/output/
+/$build/
+/docs/agile/reports/
+__pycache__/
+*.py[cod]
+
+# Local configuration and private runtime state
+/.env.*
+!/.env.example
+/.ssh-known-hosts.*
+/registry.json
+/hands.json
+/tls/
+*.key
+# Deliberately public artificial key required by TLS regression tests
+!/tests/fixtures/tls/server.key
